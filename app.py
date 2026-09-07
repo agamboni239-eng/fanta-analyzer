@@ -1,6 +1,22 @@
 import pandas as pd
 import streamlit as st
 
+# Modulo di caricamento file nella sidebar
+st.sidebar.header("📁 Carica Dati Reali")
+uploaded_file = st.sidebar.file_uploader(
+    "Carica il listino (.csv o .xlsx)", type=["csv", "xlsx"]
+)
+
+if uploaded_file is not None:
+  if uploaded_file.name.endswith(".csv"):
+    df = pd.read_csv(uploaded_file)
+  else:
+    df = pd.read_excel(uploaded_file)
+  st.sidebar.success("File caricato con successo!")
+else:
+  # Se non carichi nulla, l'app usa i dati di prova predefiniti
+  df = pd.DataFrame(data)
+    
 # Configurazione della pagina
 st.set_page_config(
     page_title="Fanta Analyzer", page_icon="⚽", layout="wide"
