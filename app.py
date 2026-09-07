@@ -70,21 +70,24 @@ if df is not None:
     elif stato_sel == "Solo Acquistati":
       df_filtrato = df_filtrato[df_filtrato["FantaSquadra"].notna()]
 
-    fantasquadre = ["Tutte"] + sorted(
+    fantasquadre = sorted(
         [
             str(x)
             for x in df["FantaSquadra"].dropna().unique()
             if str(x).strip() != ""
         ]
     )
-    if len(fantasquadre) > 1 and stato_sel != "Solo Acquistati":
+    fantasquadre_filtro = ["Tutte"] + fantasquadre
+    if len(fantasquadre) > 0 and stato_sel != "Solo Svincolati":
       fantasquadra_sel = st.sidebar.selectbox(
-          "FantaSquadra della Lega", fantasquadre
+          "FantaSquadra della Lega", fantasquadre_filtro
       )
       if fantasquadra_sel != "Tutte":
         df_filtrato = df_filtrato[
             df_filtrato["FantaSquadra"].astype(str) == fantasquadra_sel
         ]
+  else:
+    fantasquadre = []
 
   # Filtro Ruolo Classic
   if "Ruolo" in df.columns:
@@ -114,11 +117,14 @@ if df is not None:
           .str.contains(nome_cercato, case=False)
       ]
 
-  # Creazione Tab per organizzare la vista
-  tab1, tab2 = st.tabs(
-      ["📋 Lista Calciatori", "📊 Grafico Occasioni (FM vs Quotazione)"]
-  )
+  # Tab dell'app
+  tab1, tab2, tab3 = st.tabs([
+      "📋 Lista Calciatori",
+      "📊 Grafico Occasioni",
+      "🛡️ Analisi Rose Lega",
+  ])
 
+  # TAB 1: LISTA GENERALE
   with tab1:
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Calciatori Selezionati", len(df_filtrato))
@@ -164,14 +170,14 @@ if df is not None:
         hide_index=True,
     )
 
+  # TAB 2: GRAFICO OCCASIONI
   with tab2:
     st.subheader("🎯 Mappa delle Occasioni: FantaMedia vs Quotazione")
     st.markdown(
         "I giocatori **in alto a sinistra** (alta FantaMedia, bassa Quotazione)"
-        " rappresentano i **migliori affari del mercato**."
+        " rappresentano i **migliori affari**."
     )
 
-    # Filtriamo i giocatori che hanno almeno 1 partita a voto per non inquinare il grafico
     df_chart = df_filtrato.copy()
     if "PartiteVoto" in df_chart.columns:
       df_chart = df_chart[df_chart["PartiteVoto"] > 0]
@@ -179,7 +185,6 @@ if df is not None:
     if not df_chart.empty and {"Quotazione", "FantaMedia"}.issubset(
         df_chart.columns
     ):
-      # Grafico a dispersione interattivo Plotly
       fig = px.scatter(
           df_chart,
           x="Quotazione",
@@ -205,34 +210,130 @@ if df is not None:
               "FantaMedia": "FantaMedia (FM)",
           },
       )
-
-      # Aggiungiamo linee medie di riferimento per dividere il grafico in 4 quadranti
-      mediana_quot = df_chart["Quotazione"].median()
-      mediana_fm = df_chart["FantaMedia"].median()
-
       fig.add_hline(
-          y=mediana_fm,
+          y=df_chart["FantaMedia"].median(),
           line_dash="dot",
           line_color="gray",
-          annotation_text="FantaMedia Mediana",
+          annotation_text="FM Mediana",
       )
       fig.add_vline(
-          x=mediana_quot,
+          x=df_chart["Quotazione"].median(),
           line_dash="dot",
           line_color="gray",
           annotation_text="Quotazione Mediana",
       )
-
       fig.update_layout(height=600)
       st.plotly_chart(fig, use_container_width=True)
     else:
+      st.info("Nessun dato disponibile con i filtri correnti.")
+
+  # TAB 3: ANALISI ROSE LEGA
+  with tab3:
+    st.subheader("🛡️ Analisi Dettagliata Rosa FantaSquadra")
+
+    if fantasquadre:
+      squadra_scelta = st.selectbox(
+          "Seleziona la FantaSquadra da analizzare:", fantasquadre
+      )
+      df_squadra = df[df["FantaSquadra"].astype(str) == squadra_scelta].copy()
+
+      # KPI della FantaSquadra
+      kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+      kpi1.metric("Giocatori in Rosa", len(df_squadra))
+
+      tot_speso = (
+          df_squadra["Costo"].sum() if "Costo" in df_squadra.columns else 0
+      )
+      kpi2.metric("Crediti Spesi Totali", f"{int(tot_speso)}")
+
+      fm_media_squadra = (
+          df_squadra[df_squadra["PartiteVoto"] > 0]["FantaMedia"].mean()
+          if "FantaMedia" in df_squadra.columns
+          else 0
+      )
+      kpi3.metric(
+          "FantaMedia Media Rosa",
+          round(float(fm_media_squadra), 2) if pd.notna(fm_media_squadra) else 0,
+      )
+
+      top_player = (
+          df_squadra.sort_values(by="FantaMedia", ascending=False).iloc[0][
+              "Calciatore"
+          ]
+          if not df_squadra.empty and "FantaMedia" in df_squadra.columns
+          else "-"
+      )
+      kpi4.metric("Top Player (FM)", top_player)
+
+      st.write("---")
+
+      # Grafici di reparto
+      c_graf1, c_graf2 = st.columns(2)
+
+      with c_graf1:
+        st.markdown("**Composizione Rosa per Ruolo**")
+        conteggio_ruolo = (
+            df_squadra["Ruolo"].value_counts().reset_index()
+            if "Ruolo" in df_squadra.columns
+            else pd.DataFrame()
+        )
+        if not conteggio_ruolo.empty:
+          conteggio_ruolo.columns = ["Ruolo", "Conteggio"]
+          fig_bar = px.bar(
+              conteggio_ruolo,
+              x="Ruolo",
+              y="Conteggio",
+              color="Ruolo",
+              text="Conteggio",
+              title="Numero Giocatori per Reparto",
+          )
+          st.plotly_chart(fig_bar, use_container_width=True)
+
+      with c_graf2:
+        st.markdown("**Distribuzione Spesa Crediti**")
+        if "Costo" in df_squadra.columns and "Ruolo" in df_squadra.columns:
+          spesa_ruolo = (
+              df_squadra.groupby("Ruolo")["Costo"].sum().reset_index()
+          )
+          fig_pie = px.pie(
+              spesa_ruolo,
+              values="Costo",
+              names="Ruolo",
+              title="Crediti Spesi per Reparto",
+              color="Ruolo",
+          )
+          st.plotly_chart(fig_pie, use_container_width=True)
+
+      st.write("---")
+      st.markdown(f"**Rosa Completa: {squadra_scelta}**")
+
+      cols_display = [
+          c
+          for c in [
+              "Calciatore",
+              "Ruolo",
+              "Squadra",
+              "Costo",
+              "FantaMedia",
+              "MediaVoto",
+              "PartiteVoto",
+              "Quotazione",
+          ]
+          if c in df_squadra.columns
+      ]
+      st.dataframe(
+          df_squadra[cols_display].sort_values(
+              by="Ruolo", ascending=True
+          ),
+          use_container_width=True,
+          hide_index=True,
+      )
+
+    else:
       st.info(
-          "Nessun giocatore con partite a voto trovato per i filtri"
-          " selezionati."
+          "Nessuna FantaSquadra trovata nel file. Assicurati che la colonna"
+          " 'FantaSquadra' contenga i nomi dei fanta-allenatori."
       )
 
 else:
-  st.info(
-      "👈 Carica il file `.xlsx` scaricato da Leghe Fantacalcio dalla barra"
-      " laterale!"
-  )
+  st.info("👈 Carica il file `.xlsx` dalla barra laterale!")
