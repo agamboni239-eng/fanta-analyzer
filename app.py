@@ -37,7 +37,7 @@ if uploaded_file is not None:
       )
       df = pd.read_excel(uploaded_file, sheet_name=sheet)
 
-    # Mappatura colonne
+    # Mappatura colonne ufficiali Fantacalcio
     mappatura = {
         "Nome": "Calciatore",
         "Sq.": "Squadra",
@@ -60,7 +60,7 @@ if df is not None:
 
   df_filtrato = df.copy()
 
-  # Filtro Stato Giocatore
+  # Lista FantaSquadre e filtro
   if "FantaSquadra" in df.columns:
     stato_opzioni = ["Tutti", "Solo Svincolati", "Solo Acquistati"]
     stato_sel = st.sidebar.selectbox("Stato Calciatore", stato_opzioni)
@@ -117,11 +117,12 @@ if df is not None:
           .str.contains(nome_cercato, case=False)
       ]
 
-  # Tab dell'app
-  tab1, tab2, tab3 = st.tabs([
+  # Schede principali dell'applicazione
+  tab1, tab2, tab3, tab4 = st.tabs([
       "📋 Lista Calciatori",
       "📊 Grafico Occasioni",
       "🛡️ Analisi Rose Lega",
+      "🔄 Valutatore Scambi",
   ])
 
   # TAB 1: LISTA GENERALE
@@ -237,7 +238,6 @@ if df is not None:
       )
       df_squadra = df[df["FantaSquadra"].astype(str) == squadra_scelta].copy()
 
-      # KPI della FantaSquadra
       kpi1, kpi2, kpi3, kpi4 = st.columns(4)
       kpi1.metric("Giocatori in Rosa", len(df_squadra))
 
@@ -253,7 +253,9 @@ if df is not None:
       )
       kpi3.metric(
           "FantaMedia Media Rosa",
-          round(float(fm_media_squadra), 2) if pd.notna(fm_media_squadra) else 0,
+          round(float(fm_media_squadra), 2)
+          if pd.notna(fm_media_squadra)
+          else 0,
       )
 
       top_player = (
@@ -267,7 +269,6 @@ if df is not None:
 
       st.write("---")
 
-      # Grafici di reparto
       c_graf1, c_graf2 = st.columns(2)
 
       with c_graf1:
@@ -322,18 +323,132 @@ if df is not None:
           if c in df_squadra.columns
       ]
       st.dataframe(
-          df_squadra[cols_display].sort_values(
-              by="Ruolo", ascending=True
-          ),
+          df_squadra[cols_display].sort_values(by="Ruolo", ascending=True),
           use_container_width=True,
           hide_index=True,
       )
 
     else:
+      st.info("Nessuna FantaSquadra trovata nel file.")
+
+  # TAB 4: VALUTATORE DI SCAMBI (TRADE ANALYZER)
+  with tab4:
+    st.subheader("🔄 Valutatore Scambi (Trade Analyzer)")
+    st.markdown(
+        "Seleziona i giocatori coinvolti nello scambio per simularne l'impatto"
+        " sulla tua rosa."
+    )
+
+    t_col1, t_col2 = st.columns(2)
+
+    with t_col1:
+      st.markdown("### 🅰️ Giocatori che CEDO")
+      squadra_A = st.selectbox(
+          "Seleziona la tua FantaSquadra:",
+          fantasquadre,
+          key="sq_A",
+      )
+      df_squadra_A = df[df["FantaSquadra"].astype(str) == squadra_A]
+      giocatori_ceduti = st.multiselect(
+          "Seleziona i giocatori che vuoi scambiare:",
+          options=df_squadra_A["Calciatore"].tolist(),
+          key="ceduti",
+      )
+
+    with t_col2:
+      st.markdown("### 🅱️ Giocatori che RICEVO")
+      squadre_B_opts = [s for s in fantasquadre if s != squadra_A]
+      squadra_B = st.selectbox(
+          "Seleziona la FantaSquadra avversaria:",
+          squadre_B_opts,
+          key="sq_B",
+      )
+      df_squadra_B = df[df["FantaSquadra"].astype(str) == squadra_B]
+      giocatori_ricevuti = st.multiselect(
+          "Seleziona i giocatori che vuoi ricevere:",
+          options=df_squadra_B["Calciatore"].tolist(),
+          key="ricevuti",
+      )
+
+    st.write("---")
+
+    if giocatori_ceduti and giocatori_ricevuti:
+      df_ceduti = df_squadra_A[
+          df_squadra_A["Calciatore"].isin(giocatori_ceduti)
+      ]
+      df_ricevuti = df_squadra_B[
+          df_squadra_B["Calciatore"].isin(giocatori_ricevuti)
+      ]
+
+      # Calcolo Saldi
+      fm_ceduta = (
+          df_ceduti["FantaMedia"].sum() if "FantaMedia" in df_ceduti else 0
+      )
+      fm_ricevuta = (
+          df_ricevuti["FantaMedia"].sum() if "FantaMedia" in df_ricevuti else 0
+      )
+      diff_fm = fm_ricevuta - fm_ceduta
+
+      quot_ceduta = (
+          df_ceduti["Quotazione"].sum() if "Quotazione" in df_ceduti else 0
+      )
+      quot_ricevuta = (
+          df_ricevuti["Quotazione"].sum() if "Quotazione" in df_ricevuti else 0
+      )
+      diff_quot = quot_ricevuta - quot_ceduta
+
+      fvm_ceduto = df_ceduti["FVM"].sum() if "FVM" in df_ceduti else 0
+      fvm_ricevuto = df_ricevuti["FVM"].sum() if "FVM" in df_ricevuti else 0
+      diff_fvm = fvm_ricevuto - fvm_ceduto
+
+      st.markdown("### ⚖️ Bilancio dello Scambio")
+
+      res_col1, res_col2, res_col3 = st.columns(3)
+      res_col1.metric("Delta FantaMedia Totale", f"{diff_fm:+.2f}", delta_color="normal")
+      res_col2.metric("Delta Quotazione Totale", f"{diff_quot:+.0f}", delta_color="normal")
+      res_col3.metric("Delta FVM (FantaValorMedio)", f"{diff_fvm:+.0f}", delta_color="normal")
+
+      # Verdetto
+      if diff_fm > 0 and diff_fvm >= 0:
+        st.success(
+            "🟢 **Scambio Vantaggioso:** Ottieni un guadagno sia in FantaMedia"
+            " che in valore complessivo!"
+        )
+      elif diff_fm < 0 and diff_fvm < 0:
+        st.error(
+            "🔴 **Scambio Svantaggioso:** Perdi sia FantaMedia che valore di"
+            " rosa."
+        )
+      else:
+        st.warning(
+            "🟡 **Scambio Equilibrato / Strategico:** Stai scambiando valore per"
+            " titolarità o ridistribuendo i ruoli tra i reparti."
+        )
+
+      # Dettaglio Giocatori Confrontati
+      c_det1, c_det2 = st.columns(2)
+      cols_show = [
+          c
+          for c in ["Calciatore", "Ruolo", "Squadra", "FantaMedia", "Quotazione", "FVM"]
+          if c in df.columns
+      ]
+
+      with c_det1:
+        st.markdown("**Giocatori Ceduti**")
+        st.dataframe(df_ceduti[cols_show], hide_index=True, use_container_width=True)
+
+      with c_det2:
+        st.markdown("**Giocatori Ricevuti**")
+        st.dataframe(df_ricevuti[cols_show], hide_index=True, use_container_width=True)
+
+    else:
       st.info(
-          "Nessuna FantaSquadra trovata nel file. Assicurati che la colonna"
-          " 'FantaSquadra' contenga i nomi dei fanta-allenatori."
+          "Seleziona almeno un giocatore da cedere e uno da ricevere per"
+          " visualizzare l'analisi dello scambio."
       )
 
 else:
-  st.info("👈 Carica il file `.xlsx` dalla barra laterale!")
+  st.info(
+      "👈 Carica il file `.xlsx` scaricato da Leghe Fantacalcio dalla barra"
+      " laterale!"
+  )
