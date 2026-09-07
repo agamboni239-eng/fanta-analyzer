@@ -6,46 +6,13 @@ st.set_page_config(
     page_title="Fanta Analyzer", page_icon="⚽", layout="wide"
 )
 
-st.title("⚽ Fanta Analyzer - Dashboard Calciatori")
-st.markdown("Analizza le statistiche dei giocatori per l'asta e la formazione.")
+st.title("⚽ Fanta Analyzer - Dashboard Lega Fantacalcio")
+st.markdown("Analisi della lista calciatori e delle rose della tua lega.")
 
-# Dati di prova di default
-data_default = {
-    "Calciatore": [
-        "Lautaro Martinez",
-        "Kvaratskhelia",
-        "Barella",
-        "Theo Hernandez",
-        "Di Gregorio",
-        "Calhanoglu",
-        "Lookman",
-        "Bremer",
-        "Provedel",
-        "Orsolini",
-    ],
-    "Squadra": [
-        "Inter",
-        "Napoli",
-        "Inter",
-        "Milan",
-        "Juventus",
-        "Inter",
-        "Atalanta",
-        "Juventus",
-        "Lazio",
-        "Bologna",
-    ],
-    "Ruolo": ["A", "A", "C", "D", "P", "C", "A", "D", "P", "C"],
-    "Quotazione": [38, 32, 22, 19, 15, 25, 30, 16, 14, 20],
-    "FantaMedia": [8.5, 8.1, 7.2, 6.8, 5.5, 7.8, 8.2, 6.6, 5.2, 7.4],
-    "Gol": [24, 11, 4, 5, 0, 10, 17, 3, 0, 10],
-    "Assist": [3, 6, 6, 4, 0, 8, 8, 0, 0, 4],
-}
-
-# Sidebar per il caricamento file
-st.sidebar.header("📁 Carica Dati Reali")
+# 1. Sidebar: Caricamento File
+st.sidebar.header("📁 Carica Listone / File Lega")
 uploaded_file = st.sidebar.file_uploader(
-    "Carica listino (.csv o .xlsx)", type=["csv", "xlsx"]
+    "Carica file Excel (.xlsx) o CSV", type=["xlsx", "csv"]
 )
 
 df = None
@@ -53,7 +20,6 @@ df = None
 if uploaded_file is not None:
   try:
     if uploaded_file.name.endswith(".csv"):
-      # Prova a leggere prima con separatore virgola, poi con punto e virgola
       try:
         df = pd.read_csv(uploaded_file)
         if len(df.columns) <= 1:
@@ -63,101 +29,139 @@ if uploaded_file is not None:
         uploaded_file.seek(0)
         df = pd.read_csv(uploaded_file, sep=";")
     else:
-      df = pd.read_excel(uploaded_file)
+      # Legge la scheda 'Lista calciatori' se presente, altrimenti la prima scheda
+      xls = pd.ExcelFile(uploaded_file)
+      sheet = (
+          "Lista calciatori"
+          if "Lista calciatori" in xls.sheet_names
+          else xls.sheet_names[0]
+      )
+      df = pd.read_excel(uploaded_file, sheet_name=sheet)
 
-    # Mappatura automatica colonne di Fantacalcio.it
-    mappatura_colonne = {
+    # Mappatura automatica delle colonne dal file Fantacalcio
+    mappatura = {
         "Nome": "Calciatore",
-        "R": "Ruolo",
+        "Sq.": "Squadra",
         "R.": "Ruolo",
-        "Qt.A": "Quotazione",
-        "Qt. A": "Quotazione",
-        "Qt.I": "Quotazione",
-        "Fm": "FantaMedia",
+        "QUOT.": "Quotazione",
         "FM": "FantaMedia",
-        "Mv": "MediaVoto",
         "MV": "MediaVoto",
-        "G": "Gol",
-        "A": "Assist",
+        "PGv": "PartiteVoto",
+        "FVM/1000": "FVM",
     }
-    df = df.rename(columns=mappatura_colonne)
+    df = df.rename(columns=mappatura)
+    st.sidebar.success(f"File caricato! ({len(df)} calciatori trovati)")
 
-    st.sidebar.success("File caricato con successo!")
   except Exception as e:
-    st.sidebar.error(f"Errore nella lettura del file: {e}")
-    df = pd.DataFrame(data_default)
-else:
-  df = pd.DataFrame(data_default)
+    st.sidebar.error(f"Errore durante la lettura del file: {e}")
 
-st.sidebar.write("---")
-
-# Filtri
-st.sidebar.header("🔍 Filtri di Ricerca")
-
-if {"Ruolo", "Squadra", "Calciatore"}.issubset(df.columns):
-  ruoli = ["Tutti"] + list(df["Ruolo"].dropna().astype(str).unique())
-  ruolo_selezionato = st.sidebar.selectbox("Seleziona Ruolo", ruoli)
-
-  squadre = ["Tutte"] + sorted(
-      list(df["Squadra"].dropna().astype(str).unique())
-  )
-  squadra_selezionata = st.sidebar.selectbox("Seleziona Squadra", squadre)
-
-  nome_cercato = st.sidebar.text_input("Cerca Calciatore", "")
+# 2. Gestione Dati e Filtri
+if df is not None:
+  st.sidebar.write("---")
+  st.sidebar.header("🔍 Filtri Avanzati")
 
   df_filtrato = df.copy()
 
-  if ruolo_selezionato != "Tutti":
-    df_filtrato = df_filtrato[
-        df_filtrato["Ruolo"].astype(str) == ruolo_selezionato
-    ]
+  # Filtro Stato Giocatore (Svincolati / Acquistati)
+  if "FantaSquadra" in df.columns:
+    stato_opzioni = ["Tutti", "Solo Svincolati", "Solo Acquistati"]
+    stato_sel = st.sidebar.selectbox("Stato Calciatore", stato_opzioni)
 
-  if squadra_selezionata != "Tutte":
-    df_filtrato = df_filtrato[
-        df_filtrato["Squadra"].astype(str) == squadra_selezionata
-    ]
+    if stato_sel == "Solo Svincolati":
+      df_filtrato = df_filtrato[df_filtrato["FantaSquadra"].isna()]
+    elif stato_sel == "Solo Acquistati":
+      df_filtrato = df_filtrato[df_filtrato["FantaSquadra"].notna()]
 
-  if nome_cercato:
-    df_filtrato = df_filtrato[
-        df_filtrato["Calciatore"]
-        .astype(str)
-        .str.contains(nome_cercato, case=False)
-    ]
+    # Filtro FantaSquadra specifica
+    fantasquadre = ["Tutte"] + sorted(
+        [
+            str(x)
+            for x in df["FantaSquadra"].dropna().unique()
+            if str(x).strip() != ""
+        ]
+    )
+    if len(fantasquadre) > 1 and stato_sel != "Solo Svincolati":
+      fantasquadra_sel = st.sidebar.selectbox(
+          "FantaSquadra della Lega", fantasquadre
+      )
+      if fantasquadra_sel != "Tutte":
+        df_filtrato = df_filtrato[
+            df_filtrato["FantaSquadra"].astype(str) == fantasquadra_sel
+        ]
 
-  # Metriche
+  # Filtro Ruolo Classic
+  if "Ruolo" in df.columns:
+    ruoli = ["Tutti"] + list(df["Ruolo"].dropna().astype(str).unique())
+    ruolo_sel = st.sidebar.selectbox("Ruolo Classic", ruoli)
+    if ruolo_sel != "Tutti":
+      df_filtrato = df_filtrato[df_filtrato["Ruolo"].astype(str) == ruolo_sel]
+
+  # Filtro Squadra Serie A
+  if "Squadra" in df.columns:
+    squadre = ["Tutte"] + sorted(
+        list(df["Squadra"].dropna().astype(str).unique())
+    )
+    squadra_sel = st.sidebar.selectbox("Squadra Serie A", squadre)
+    if squadra_sel != "Tutte":
+      df_filtrato = df_filtrato[
+          df_filtrato["Squadra"].astype(str) == squadra_sel
+      ]
+
+  # Ricerca per Nome Calciatore
+  if "Calciatore" in df.columns:
+    nome_cercato = st.sidebar.text_input("Cerca Calciatore", "")
+    if nome_cercato:
+      df_filtrato = df_filtrato[
+          df_filtrato["Calciatore"]
+          .astype(str)
+          .str.contains(nome_cercato, case=False)
+      ]
+
+  # 3. Metriche Chiave
   col1, col2, col3, col4 = st.columns(4)
-  col1.metric("Giocatori Visualizzati", len(df_filtrato))
+  col1.metric("Calciatori Selezionati", len(df_filtrato))
 
   if "FantaMedia" in df_filtrato.columns:
-    col2.metric(
-        "FantaMedia Max",
-        (
-            round(df_filtrato["FantaMedia"].max(), 2)
-            if not df_filtrato.empty
-            else 0
-        ),
-    )
+    max_fm = df_filtrato["FantaMedia"].max() if not df_filtrato.empty else 0
+    col2.metric("FantaMedia Max", round(float(max_fm), 2))
+
   if "Quotazione" in df_filtrato.columns:
-    col3.metric(
-        "Quotazione Media",
-        (
-            round(df_filtrato["Quotazione"].mean(), 1)
-            if not df_filtrato.empty
-            else 0
-        ),
-    )
-  if "Gol" in df_filtrato.columns:
-    col4.metric(
-        "Totale Gol", df_filtrato["Gol"].sum() if not df_filtrato.empty else 0
-    )
+    quot_med = df_filtrato["Quotazione"].mean() if not df_filtrato.empty else 0
+    col3.metric("Quotazione Media", round(float(quot_med), 1))
+
+  if "FVM" in df_filtrato.columns:
+    fvm_max = df_filtrato["FVM"].max() if not df_filtrato.empty else 0
+    col4.metric("FVM Max", int(fvm_max))
 
   st.write("---")
 
-  # Tabella
-  st.subheader("📋 Lista Calciatori")
-  st.dataframe(df_filtrato, use_container_width=True, hide_index=True)
+  # 4. Tabella Risultati
+  st.subheader("📋 Lista e Statistiche Calciatori")
+
+  # Mettiamo in ordine le colonne principali per la visualizzazione
+  colonne_prioritarie = [
+      "Calciatore",
+      "Squadra",
+      "Ruolo",
+      "R.MANTRA",
+      "Quotazione",
+      "FantaMedia",
+      "MediaVoto",
+      "PartiteVoto",
+      "FVM",
+      "FantaSquadra",
+      "Costo",
+  ]
+  colonne_presenti = [c for c in colonne_prioritarie if c in df_filtrato.columns]
+  altre_colonne = [c for c in df_filtrato.columns if c not in colonne_presenti]
+  colonne_finali = colonne_presenti + altre_colonne
+
+  st.dataframe(
+      df_filtrato[colonne_finali], use_container_width=True, hide_index=True
+  )
+
 else:
-  st.warning(
-      "Impossibile trovare le colonne necessarie. Colonne rilevate nel file:"
-      f" `{list(df.columns)}`"
+  st.info(
+      "👈 Carica il file `.xlsx` scaricato da Fantacalcio dalla barra laterale a"
+      " sinistra per visualizzare la dashboard!"
   )
