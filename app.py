@@ -1,3 +1,4 @@
+import io
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -37,7 +38,7 @@ if uploaded_file is not None:
       )
       df = pd.read_excel(uploaded_file, sheet_name=sheet)
 
-    # Mappatura colonne ufficiali Fantacalcio
+    # Mappatura colonne
     mappatura = {
         "Nome": "Calciatore",
         "Sq.": "Squadra",
@@ -117,12 +118,13 @@ if df is not None:
           .str.contains(nome_cercato, case=False)
       ]
 
-  # Schede principali dell'applicazione
-  tab1, tab2, tab3, tab4 = st.tabs([
+  # Tab dell'app
+  tab1, tab2, tab3, tab4, tab5 = st.tabs([
       "📋 Lista Calciatori",
       "📊 Grafico Occasioni",
       "🛡️ Analisi Rose Lega",
       "🔄 Valutatore Scambi",
+      "📄 Report & Formazione",
   ])
 
   # TAB 1: LISTA GENERALE
@@ -234,7 +236,9 @@ if df is not None:
 
     if fantasquadre:
       squadra_scelta = st.selectbox(
-          "Seleziona la FantaSquadra da analizzare:", fantasquadre
+          "Seleziona la FantaSquadra da analizzare:",
+          fantasquadre,
+          key="tab3_sq",
       )
       df_squadra = df[df["FantaSquadra"].astype(str) == squadra_scelta].copy()
 
@@ -331,7 +335,7 @@ if df is not None:
     else:
       st.info("Nessuna FantaSquadra trovata nel file.")
 
-  # TAB 4: VALUTATORE DI SCAMBI (TRADE ANALYZER)
+  # TAB 4: VALUTATORE DI SCAMBI
   with tab4:
     st.subheader("🔄 Valutatore Scambi (Trade Analyzer)")
     st.markdown(
@@ -380,7 +384,6 @@ if df is not None:
           df_squadra_B["Calciatore"].isin(giocatori_ricevuti)
       ]
 
-      # Calcolo Saldi
       fm_ceduta = (
           df_ceduti["FantaMedia"].sum() if "FantaMedia" in df_ceduti else 0
       )
@@ -404,11 +407,10 @@ if df is not None:
       st.markdown("### ⚖️ Bilancio dello Scambio")
 
       res_col1, res_col2, res_col3 = st.columns(3)
-      res_col1.metric("Delta FantaMedia Totale", f"{diff_fm:+.2f}", delta_color="normal")
-      res_col2.metric("Delta Quotazione Totale", f"{diff_quot:+.0f}", delta_color="normal")
-      res_col3.metric("Delta FVM (FantaValorMedio)", f"{diff_fvm:+.0f}", delta_color="normal")
+      res_col1.metric("Delta FantaMedia Totale", f"{diff_fm:+.2f}")
+      res_col2.metric("Delta Quotazione Totale", f"{diff_quot:+.0f}")
+      res_col3.metric("Delta FVM (FantaValorMedio)", f"{diff_fvm:+.0f}")
 
-      # Verdetto
       if diff_fm > 0 and diff_fvm >= 0:
         st.success(
             "🟢 **Scambio Vantaggioso:** Ottieni un guadagno sia in FantaMedia"
@@ -425,27 +427,223 @@ if df is not None:
             " titolarità o ridistribuendo i ruoli tra i reparti."
         )
 
-      # Dettaglio Giocatori Confrontati
       c_det1, c_det2 = st.columns(2)
       cols_show = [
           c
-          for c in ["Calciatore", "Ruolo", "Squadra", "FantaMedia", "Quotazione", "FVM"]
+          for c in [
+              "Calciatore",
+              "Ruolo",
+              "Squadra",
+              "FantaMedia",
+              "Quotazione",
+              "FVM",
+          ]
           if c in df.columns
       ]
 
       with c_det1:
         st.markdown("**Giocatori Ceduti**")
-        st.dataframe(df_ceduti[cols_show], hide_index=True, use_container_width=True)
+        st.dataframe(
+            df_ceduti[cols_show], hide_index=True, use_container_width=True
+        )
 
       with c_det2:
         st.markdown("**Giocatori Ricevuti**")
-        st.dataframe(df_ricevuti[cols_show], hide_index=True, use_container_width=True)
+        st.dataframe(
+            df_ricevuti[cols_show], hide_index=True, use_container_width=True
+        )
 
     else:
       st.info(
           "Seleziona almeno un giocatore da cedere e uno da ricevere per"
           " visualizzare l'analisi dello scambio."
       )
+
+  # TAB 5: REPORT & OTTIMIZZATORE MODULO
+  with tab5:
+    st.subheader("📄 Report & Ottimizzatore Modulo (con Modificatore Difesa)")
+    st.markdown(
+        "L'algoritmo valuta tutti i moduli consentiti (3-4-3, 3-5-2, 4-3-3,"
+        " 4-4-2, 4-5-1, 5-3-2, 5-4-1) e calcola il bonus atteso del"
+        " **Modificatore Difesa** per identificare l'XI titolare più potente."
+    )
+
+    if fantasquadre:
+      rep_col1, rep_col2 = st.columns([2, 1])
+
+      with rep_col1:
+        squadra_rep = st.selectbox(
+            "Seleziona FantaSquadra:",
+            fantasquadre,
+            key="rep_sq",
+        )
+
+      with rep_col2:
+        usa_modificatore = st.checkbox(
+            "Attiva Modificatore Difesa",
+            value=True,
+            help=(
+                "Si attiva con difesa a 4 o 5. Calcola il bonus in base alla"
+                " MediaVoto del portiere e dei 3 migliori difensori."
+            ),
+        )
+
+      df_squadra_rep = df[
+          df["FantaSquadra"].astype(str) == squadra_rep
+      ].copy()
+
+      if not df_squadra_rep.empty:
+        df_squadra_rep["FantaMedia_clean"] = pd.to_numeric(
+            df_squadra_rep["FantaMedia"], errors="coerce"
+        ).fillna(0)
+        df_squadra_rep["MediaVoto_clean"] = pd.to_numeric(
+            df_squadra_rep["MediaVoto"], errors="coerce"
+        ).fillna(0)
+
+        # Moduli ammessi
+        moduli = [
+            (3, 4, 3),
+            (3, 5, 2),
+            (4, 3, 3),
+            (4, 4, 2),
+            (4, 5, 1),
+            (5, 3, 2),
+            (5, 4, 1),
+        ]
+        risultati_moduli = []
+
+        for d_c, c_c, a_c in moduli:
+          p = df_squadra_rep[df_squadra_rep["Ruolo"] == "P"].nlargest(
+              1, "FantaMedia_clean"
+          )
+          d = df_squadra_rep[df_squadra_rep["Ruolo"] == "D"].nlargest(
+              d_c, "FantaMedia_clean"
+          )
+          c = df_squadra_rep[df_squadra_rep["Ruolo"] == "C"].nlargest(
+              c_c, "FantaMedia_clean"
+          )
+          a = df_squadra_rep[df_squadra_rep["Ruolo"] == "A"].nlargest(
+              a_c, "FantaMedia_clean"
+          )
+
+          if (
+              len(p) < 1
+              or len(d) < d_c
+              or len(c) < c_c
+              or len(a) < a_c
+          ):
+            continue
+
+          lineup = pd.concat([p, d, c, a])
+          base_fm = lineup["FantaMedia_clean"].sum()
+
+          # Calcolo Modificatore Difesa (se d_c >= 4)
+          mod_bonus = 0
+          if usa_modificatore and d_c >= 4:
+            gk_mv = p["MediaVoto_clean"].iloc[0]
+            defs_mv = sorted(d["MediaVoto_clean"].tolist(), reverse=True)[:3]
+            if len(defs_mv) == 3:
+              avg_def = (gk_mv + sum(defs_mv)) / 4.0
+              if avg_def >= 7.0:
+                mod_bonus = 6
+              elif avg_def >= 6.75:
+                mod_bonus = 5
+              elif avg_def >= 6.5:
+                mod_bonus = 4
+              elif avg_def >= 6.25:
+                mod_bonus = 3
+              elif avg_def >= 6.0:
+                mod_bonus = 1
+
+          tot_score = base_fm + mod_bonus
+          risultati_moduli.append({
+              "Modulo": f"{d_c}-{c_c}-{a_c}",
+              "Base FM": round(base_fm, 2),
+              "Bonus Modificatore": mod_bonus,
+              "Punteggio Totale Atteso": round(tot_score, 2),
+              "Lineup": lineup,
+          })
+
+        df_moduli = pd.DataFrame(risultati_moduli).sort_values(
+            by="Punteggio Totale Atteso", ascending=False
+        )
+
+        if not df_moduli.empty:
+          miglior_modulo = df_moduli.iloc[0]
+
+          # KPI Modulo Consigliato
+          st.write("---")
+          kpi_m1, kpi_m2, kpi_m3, kpi_m4 = st.columns(4)
+          kpi_m1.metric("Modulo Consigliato", miglior_modulo["Modulo"])
+          kpi_m2.metric(
+              "Punteggio Totale Atteso",
+              f"{miglior_modulo['Punteggio Totale Atteso']:.2f}",
+          )
+          kpi_m3.metric(
+              "Somma FantaMedia Base", f"{miglior_modulo['Base FM']:.2f}"
+          )
+          kpi_m4.metric(
+              "Bonus Modificatore", f"+{miglior_modulo['Bonus Modificatore']}"
+          )
+
+          st.write("---")
+
+          # Tabella di confronto tra i moduli
+          st.markdown("### 📊 Confronto Rendimento Moduli Tattici")
+          st.dataframe(
+              df_moduli[
+                  ["Modulo", "Base FM", "Bonus Modificatore", "Punteggio Totale Atteso"]
+              ],
+              use_container_width=True,
+              hide_index=True,
+          )
+
+          # Formazione IdealeSchierata
+          top_11 = miglior_modulo["Lineup"]
+          st.markdown(
+              f"### 🏟️ XI Titolare Consigliato ({miglior_modulo['Modulo']}) -"
+              f" {squadra_rep}"
+          )
+
+          cols_rep = [
+              c
+              for c in [
+                  "Ruolo",
+                  "Calciatore",
+                  "Squadra",
+                  "FantaMedia",
+                  "MediaVoto",
+                  "PartiteVoto",
+                  "Costo",
+              ]
+              if c in top_11.columns
+          ]
+          st.dataframe(
+              top_11[cols_rep], use_container_width=True, hide_index=True
+          )
+
+          # Download File Excel
+          output = io.BytesIO()
+          with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            top_11[cols_rep].to_excel(
+                writer, index=False, sheet_name=f"Top XI {miglior_modulo['Modulo']}"
+            )
+            df_moduli[
+                ["Modulo", "Base FM", "Bonus Modificatore", "Punteggio Totale Atteso"]
+            ].to_excel(writer, index=False, sheet_name="Confronto Moduli")
+            df_squadra_rep[cols_rep].to_excel(
+                writer, index=False, sheet_name="Rosa Completa"
+            )
+          excel_data = output.getvalue()
+
+          st.download_button(
+              label=f"📥 Scarica Report Excel ({squadra_rep})",
+              data=excel_data,
+              file_name=f"Report_{squadra_rep}.xlsx",
+              mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          )
+    else:
+      st.info("Nessuna FantaSquadra trovata per generare il report.")
 
 else:
   st.info(
