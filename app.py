@@ -291,7 +291,7 @@ if df is not None:
                 spesi_acq = df_sq_acq["Costo"].sum()
                 rimasti_acq = budget_iniziale - spesi_acq
 
-                presi_ruolo = len(df_sq_acq[df_sq_acq["Ruolo"] == ruolo_g])
+                presi_ruolo = len(df_sq_acq[df_sq_acq["Ruolo"] == ruolo_g]) if "Ruolo" in df_sq_acq.columns else 0
                 slot_rimasti_ruolo = max(1, target_slots.get(ruolo_g, 6) - presi_ruolo)
                 tot_slot_rimasti = max(1, tot_slots_target - len(df_sq_acq))
 
