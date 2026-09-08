@@ -896,10 +896,6 @@ if df is not None:
                 target_cols = ["Ruolo", "Calciatore", "Squadra", "Status", "FantaMedia"]
                 available_cols = [col for col in target_cols if col in xi_casa.columns]
 
-                st.write("Dati xi_casa:", type(xi_casa))
-if hasattr(xi_casa, 'columns'):
-    st.write("Colonne disponibili in xi_casa:", list(xi_casa.columns))
-
                 st.dataframe(xi_casa[available_cols], hide_index=True, use_container_width=True)
 
             with c_xi2:
