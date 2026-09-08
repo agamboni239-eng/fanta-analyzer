@@ -26,6 +26,9 @@ uploaded_file = st.sidebar.file_uploader(
     "Carica file Excel (.xlsx) o CSV (Export Fantaleghe)", type=["xlsx", "csv"]
 )
 
+# Rimuove gli spazi all'inizio e alla fine di tutti i nomi delle colonne
+df_sq.columns = df_sq.columns.str.strip()
+
 if uploaded_file is not None and st.session_state["df_data"] is None:
     try:
         if uploaded_file.name.endswith(".csv"):
@@ -322,13 +325,23 @@ if df is not None:
     report_rose = []
     for sq in lista_squadre:
         df_sq = df[df["FantaSquadra"] == sq]
+        st.write(df_sq.columns.tolist())
+        df_sq.columns = df_sq.columns.str.strip()
         spesi = df_sq["Costo"].sum()
         residui = budget_iniziale - spesi
 
-        p_count = len(df_sq[df_sq["Ruolo"] == "P"])
-        d_count = len(df_sq[df_sq["Ruolo"] == "D"])
-        c_count = len(df_sq[df_sq["Ruolo"] == "C"])
-        a_count = len(df_sq[df_sq["Ruolo"] == "A"])
+       col_ruolo = next((c for c in df_sq.columns if c.strip().lower() in ["ruolo", "r", "role"]), None)
+
+if col_ruolo:
+    # Trasforma i valori in maiuscolo e senza spazi
+    ruoli = df_sq[col_ruolo].astype(str).str.strip().str.upper()
+    
+    p_count = len(df_sq[ruoli == "P"])
+    d_count = len(df_sq[ruoli == "D"])
+    c_count = len(df_sq[ruoli == "C"])
+    a_count = len(df_sq[ruoli == "A"])
+else:
+    st.error("Colonna Ruolo non trovata nel dataset!")
         tot_in_rosa = len(df_sq)
 
         slot_rimasti_tot = max(0, tot_slots_target - tot_in_rosa)
