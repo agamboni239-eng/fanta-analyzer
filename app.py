@@ -26,9 +26,6 @@ uploaded_file = st.sidebar.file_uploader(
     "Carica file Excel (.xlsx) o CSV (Export Fantaleghe)", type=["xlsx", "csv"]
 )
 
-# Rimuove gli spazi all'inizio e alla fine di tutti i nomi delle colonne
-df_sq.columns = df_sq.columns.str.strip()
-
 if uploaded_file is not None and st.session_state["df_data"] is None:
     try:
         if uploaded_file.name.endswith(".csv"):
@@ -48,6 +45,9 @@ if uploaded_file is not None and st.session_state["df_data"] is None:
                 else ("Lista calciatori" if "Lista calciatori" in xls.sheet_names else xls.sheet_names[0])
             )
             df_raw = pd.read_excel(uploaded_file, sheet_name=sheet)
+
+        # Pulizia nomi colonne
+        df_raw.columns = df_raw.columns.str.strip()
 
         # Mappatura specifica per export e listone Leghe Fantacalcio
         mappatura = {
@@ -317,50 +317,47 @@ if df is not None:
                 st.write(f"**Crediti Residui ({sq_acquirente}):** `{rimasti_acq} cr`")
                 st.write(f"**Max Offerta Singola consentita:** `{max_bid_possibile} cr`")
 
-    st.write("---")
+        st.write("---")
 
-    # Tabella Riepilogativa Rose & Crediti
-    st.markdown("### 📊 Monitor Crediti e Slot Rose Lega")
+        # Tabella Riepilogativa Rose & Crediti
+        st.markdown("### 📊 Monitor Crediti e Slot Rose Lega")
 
-    report_rose = []
-    for sq in lista_squadre:
-        df_sq = df[df["FantaSquadra"] == sq]
-        st.write(df_sq.columns.tolist())
-        df_sq.columns = df_sq.columns.str.strip()
-        spesi = df_sq["Costo"].sum()
-        residui = budget_iniziale - spesi
+        report_rose = []
+        for sq in lista_squadre:
+            df_sq = df[df["FantaSquadra"] == sq].copy()
+            df_sq.columns = df_sq.columns.str.strip()
+            spesi = df_sq["Costo"].sum() if "Costo" in df_sq.columns else 0
+            residui = budget_iniziale - spesi
 
-       col_ruolo = next((c for c in df_sq.columns if c.strip().lower() in ["ruolo", "r", "role"]), None)
+            col_ruolo = next((c for c in df_sq.columns if c.strip().lower() in ["ruolo", "r", "role"]), None)
 
-if col_ruolo:
-    # Trasforma i valori in maiuscolo e senza spazi
-    ruoli = df_sq[col_ruolo].astype(str).str.strip().str.upper()
-    
-    p_count = len(df_sq[ruoli == "P"])
-    d_count = len(df_sq[ruoli == "D"])
-    c_count = len(df_sq[ruoli == "C"])
-    a_count = len(df_sq[ruoli == "A"])
-else:
-    st.error("Colonna Ruolo non trovata nel dataset!")
-        tot_in_rosa = len(df_sq)
+            if col_ruolo:
+                ruoli_series = df_sq[col_ruolo].astype(str).str.strip().str.upper()
+                p_count = len(df_sq[ruoli_series == "P"])
+                d_count = len(df_sq[ruoli_series == "D"])
+                c_count = len(df_sq[ruoli_series == "C"])
+                a_count = len(df_sq[ruoli_series == "A"])
+            else:
+                p_count = d_count = c_count = a_count = 0
 
-        slot_rimasti_tot = max(0, tot_slots_target - tot_in_rosa)
-        max_bid = residui - (slot_rimasti_tot - 1) if slot_rimasti_tot > 0 else 0
+            tot_in_rosa = len(df_sq)
+            slot_rimasti_tot = max(0, tot_slots_target - tot_in_rosa)
+            max_bid = residui - (slot_rimasti_tot - 1) if slot_rimasti_tot > 0 else 0
 
-        report_rose.append({
-            "FantaSquadra": sq,
-            "Crediti Spesi": spesi,
-            "Crediti Residui": residui,
-            "Max Offerta": max(0, max_bid),
-            "P": f"{p_count}/{target_P}",
-            "D": f"{d_count}/{target_D}",
-            "C": f"{c_count}/{target_C}",
-            "A": f"{a_count}/{target_A}",
-            "Totale Rosa": f"{tot_in_rosa}/{tot_slots_target}",
-        })
+            report_rose.append({
+                "FantaSquadra": sq,
+                "Crediti Spesi": spesi,
+                "Crediti Residui": residui,
+                "Max Offerta": max(0, max_bid),
+                "P": f"{p_count}/{target_P}",
+                "D": f"{d_count}/{target_D}",
+                "C": f"{c_count}/{target_C}",
+                "A": f"{a_count}/{target_A}",
+                "Totale Rosa": f"{tot_in_rosa}/{tot_slots_target}",
+            })
 
-    df_report_rose = pd.DataFrame(report_rose)
-    st.dataframe(df_report_rose, use_container_width=True, hide_index=True)
+        df_report_rose = pd.DataFrame(report_rose)
+        st.dataframe(df_report_rose, use_container_width=True, hide_index=True)
 
     # ---------------------------------------------------------
     # TAB 1: LISTA GENERALE
@@ -813,27 +810,9 @@ else:
                     )
 
                     top_11 = miglior_modulo["Lineup"]
-                    st.markdown(
-                        f"### 🏟️ XI Titolare Consigliato ({miglior_modulo['Modulo']}) -"
-                        f" {squadra_rep}"
-                    )
-
-                    cols_rep = [
-                        c
-                        for c in [
-                            "Ruolo",
-                            "Calciatore",
-                            "Squadra",
-                            "Status",
-                            "FantaMedia",
-                            "MediaVoto",
-                            "PartiteVoto",
-                            "Costo",
-                        ]
-                        if c in top_11.columns
-                    ]
+                    st.markdown(f"### 🏟️ XI Titolare Consigliato ({miglior_modulo['Modulo']})")
                     st.dataframe(
-                        top_11[cols_rep],
+                        top_11[["Calciatore", "Ruolo", "Squadra", "FantaMedia", "MediaVoto"]],
                         use_container_width=True,
                         hide_index=True,
                     )
@@ -842,103 +821,54 @@ else:
     # TAB 6: SIMULATORE SCONTRI DIRETTI
     # ---------------------------------------------------------
     with tab_sim:
-        st.subheader("⚔️ Simulatore Scontri Diretti")
-        st.markdown(
-            "Simula una sfida diretta tra due FantaSquadre calcolando i punti attesi e i gol segnati in base al miglior XI schierabile."
-        )
+        st.subheader("⚔️ Simulatore Scontro Diretto tra FantaSquadre")
 
         if len(lista_squadre) >= 2:
-            col_sim1, col_sim2 = st.columns(2)
+            sim_col1, sim_col2 = st.columns(2)
 
-            with col_sim1:
-                sq_casa = st.selectbox(
-                    "FantaSquadra Casa:",
-                    lista_squadre,
-                    key="sim_sq_casa",
-                )
-            with col_sim2:
-                opts_trasferta = [s for s in lista_squadre if s != sq_casa]
-                sq_trasferta = st.selectbox(
-                    "FantaSquadra Trasferta:",
-                    opts_trasferta,
-                    key="sim_sq_trasferta",
-                )
+            with sim_col1:
+                sq_casa = st.selectbox("FantaSquadra Casa:", lista_squadre, index=0, key="sim_casa")
+                mod_casa = st.selectbox("Modulo Casa:", ["3-4-3", "3-5-2", "4-3-3", "4-4-2", "4-5-1", "5-3-2"], key="m_casa")
 
-            col_cfg1, col_cfg2, col_cfg3 = st.columns(3)
-            mod_casa = col_cfg1.selectbox(
-                "Modulo Casa:",
-                [(3, 4, 3), (3, 5, 2), (4, 3, 3), (4, 4, 2), (4, 5, 1), (5, 3, 2), (5, 4, 1)],
-                index=2,
-                key="mod_casa",
-            )
-            mod_trasferta = col_cfg2.selectbox(
-                "Modulo Trasferta:",
-                [(3, 4, 3), (3, 5, 2), (4, 3, 3), (4, 4, 2), (4, 5, 1), (5, 3, 2), (5, 4, 1)],
-                index=2,
-                key="mod_trasferta",
-            )
-            soglia_gol = col_cfg3.number_input(
-                "Soglia Primo Gol:", value=66.0, step=0.5
-            )
+            with sim_col2:
+                opts_fuori = [s for s in lista_squadre if s != sq_casa]
+                sq_fuori = st.selectbox("FantaSquadra Trasferta:", opts_fuori, index=0, key="sim_fuori")
+                mod_fuori = st.selectbox("Modulo Trasferta:", ["3-4-3", "3-5-2", "4-3-3", "4-4-2", "4-5-1", "5-3-2"], key="m_fuori")
+
+            bonus_casa = st.number_input("Bonus Casa (punti extra):", value=2.0, step=0.5)
 
             if st.button("🚀 Simula Partita", use_container_width=True):
-                df_casa = df[df["FantaSquadra"].astype(str) == sq_casa]
-                df_trasferta = df[df["FantaSquadra"].astype(str) == sq_trasferta]
+                df_casa = df[df["FantaSquadra"] == sq_casa]
+                df_fuori = df[df["FantaSquadra"] == sq_fuori]
 
-                xi_casa = calcola_miglior_xi(df_casa, modulo=mod_casa)
-                xi_trasferta = calcola_miglior_xi(df_trasferta, modulo=mod_trasferta)
+                mod_casa_tuple = tuple(map(int, mod_casa.split("-")))
+                mod_fuori_tuple = tuple(map(int, mod_fuori.split("-")))
 
-                if xi_casa is None or xi_trasferta is None:
-                    st.error(
-                        "Una o entrambe le squadre non hanno abbastanza giocatori titolari disponibili per il modulo selezionato."
-                    )
+                xi_casa = calcola_miglior_xi(df_casa, mod_casa_tuple)
+                xi_fuori = calcola_miglior_xi(df_fuori, mod_fuori_tuple)
+
+                if xi_casa is None or xi_fuori is None:
+                    st.error("Una delle due squadre non ha abbastanza giocatori nei ruoli richiesti per completare il modulo!")
                 else:
-                    punti_casa = xi_casa["FM_clean"].sum()
-                    punti_trasferta = xi_trasferta["FM_clean"].sum()
+                    pts_casa = xi_casa["FM_clean"].sum() + bonus_casa
+                    pts_fuori = xi_fuori["FM_clean"].sum()
 
-                    gol_casa = calcola_gol(punti_casa, soglia_primo_gol=soglia_gol)
-                    gol_trasferta = calcola_gol(punti_trasferta, soglia_primo_gol=soglia_gol)
+                    gol_casa = calcola_gol(pts_casa)
+                    gol_fuori = calcola_gol(pts_fuori)
 
-                    st.write("---")
-                    st.markdown("### 🏟️ Risultato Finale")
+                    st.markdown("---")
+                    st.markdown(f"## 🏆 Risultato Finale: **{sq_casa} {gol_casa} - {gol_fuori} {sq_fuori}**")
+                    
+                    res_m1, res_m2 = st.columns(2)
+                    res_m1.metric(f"Punti {sq_casa} (inc. +{bonus_casa} casa)", f"{pts_casa:.2f} pts")
+                    res_m2.metric(f"Punti {sq_fuori}", f"{pts_fuori:.2f} pts")
 
-                    res_col1, res_col2, res_col3 = st.columns([2, 1, 2])
-                    with res_col1:
-                        st.metric(
-                            label=f"🏠 {sq_casa}",
-                            value=f"{gol_casa} Gol",
-                            delta=f"{punti_casa:.2f} Punti Totali",
-                        )
-                    with res_col2:
-                        st.markdown(
-                            f"<h1 style='text-align: center; margin: 0;'>{gol_casa} - {gol_trasferta}</h1>",
-                            unsafe_allow_html=True,
-                        )
-                    with res_col3:
-                        st.metric(
-                            label=f"✈️ {sq_trasferta}",
-                            value=f"{gol_trasferta} Gol",
-                            delta=f"{punti_trasferta:.2f} Punti Totali",
-                        )
-
-                    if gol_casa > gol_trasferta:
-                        st.success(f"🎉 **Vittoria per {sq_casa}!**")
-                    elif gol_trasferta > gol_casa:
-                        st.success(f"🎉 **Vittoria per {sq_trasferta}!**")
-                    else:
-                        st.info("🤝 **Pareggio!**")
-
-                    c_lineup1, c_lineup2 = st.columns(2)
-                    cols_view = [c for c in ["Ruolo", "Calciatore", "Squadra", "FantaMedia"] if c in xi_casa.columns]
-
-                    with c_lineup1:
-                        st.markdown(f"**XI Titolare {sq_casa} ({mod_casa[0]}-{mod_casa[1]}-{mod_casa[2]})**")
-                        st.dataframe(xi_casa[cols_view], hide_index=True, use_container_width=True)
-
-                    with c_lineup2:
-                        st.markdown(f"**XI Titolare {sq_trasferta} ({mod_trasferta[0]}-{mod_trasferta[1]}-{mod_trasferta[2]})**")
-                        st.dataframe(xi_trasferta[cols_view], hide_index=True, use_container_width=True)
+                    d_c1, d_c2 = st.columns(2)
+                    with d_c1:
+                        st.markdown(f"**XI Titolare {sq_casa} ({mod_casa})**")
+                        st.dataframe(xi_casa[["Calciatore", "Ruolo", "FantaMedia"]], hide_index=True)
+                    with d_c2:
+                        st.markdown(f"**XI Titolare {sq_fuori} ({mod_fuori})**")
+                        st.dataframe(xi_fuori[["Calciatore", "Ruolo", "FantaMedia"]], hide_index=True)
         else:
-            st.info("Sono necessarie almeno 2 FantaSquadre per simulare uno scontro diretto.")
-else:
-    st.info("👈 Carica un file Excel o CSV dalla barra laterale per iniziare.")
+            st.info("Sono necessarie almeno 2 FantaSquadre registrate per simulare uno scontro diretto.")
