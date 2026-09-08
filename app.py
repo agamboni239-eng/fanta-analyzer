@@ -101,8 +101,8 @@ if df is not None:
       height=120,
   )
   lista_squadre = [
-      s.strip() for s.strip(fantasquadre_input).split("\n") if s.strip()
-  ]
+    s.strip() for s in fantasquadre_input.strip().split("\n") if s.strip()
+]
 
   st.sidebar.write("---")
   st.sidebar.header("🔍 3. Filtri Generali")
