@@ -1,6 +1,8 @@
 import io
+import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 st.set_page_config(
@@ -16,7 +18,7 @@ if "asta_history" not in st.session_state:
 if "df_data" not in st.session_state:
     st.session_state["df_data"] = None
 
-st.title("⚽ Fanta Analyzer - Dashboard & Assistente Asta Live")
+st.title("⚽ Fanta Analyzer - Dashboard, Asta Live & Simulatore")
 
 # 1. Sidebar: Caricamento File e Impostazioni Asta
 st.sidebar.header("📁 1. Carica Listone / File Lega")
@@ -87,6 +89,26 @@ if uploaded_file is not None and st.session_state["df_data"] is None:
         st.sidebar.error(f"Errore caricamento: {e}")
 
 df = st.session_state["df_data"]
+
+# Funzioni ausiliarie per il Simulatore
+def calcola_gol(punti, soglia_primo_gol=66.0, passo_gol=6.0):
+    if punti < soglia_primo_gol:
+        return 0
+    return int((punti - soglia_primo_gol) // passo_gol) + 1
+
+def calcola_miglior_xi(df_squadra, modulo=(3, 4, 3)):
+    d_c, c_c, a_c = modulo
+    df_temp = df_squadra.copy()
+    df_temp["FM_clean"] = pd.to_numeric(df_temp["FantaMedia"], errors="coerce").fillna(6.0)
+    
+    p = df_temp[df_temp["Ruolo"] == "P"].nlargest(1, "FM_clean")
+    d = df_temp[df_temp["Ruolo"] == "D"].nlargest(d_c, "FM_clean")
+    c = df_temp[df_temp["Ruolo"] == "C"].nlargest(c_c, "FM_clean")
+    a = df_temp[df_temp["Ruolo"] == "A"].nlargest(a_c, "FM_clean")
+    
+    if len(p) < 1 or len(d) < d_c or len(c) < c_c or len(a) < a_c:
+        return None
+    return pd.concat([p, d, c, a])
 
 if df is not None:
     st.sidebar.write("---")
@@ -176,13 +198,14 @@ if df is not None:
             ]
 
     # TAB APPLICAZIONE
-    tab_asta, tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab_asta, tab1, tab2, tab3, tab4, tab5, tab_sim = st.tabs([
         "⚡ Assistente Asta Live",
         "📋 Lista Calciatori",
         "📊 Grafico Occasioni",
         "🛡️ Analisi Rose Lega",
         "🔄 Valutatore Scambi",
         "📄 Report & Formazione",
+        "⚔️ Simulatore Scontri Diretti",
     ])
 
     # ---------------------------------------------------------
@@ -252,7 +275,6 @@ if df is not None:
                 fvm_g = float(info_g.get("FVM", 0)) if pd.notna(info_g.get("FVM")) else 0
                 fm_g = float(info_g.get("FantaMedia", 0)) if pd.notna(info_g.get("FantaMedia")) else 0
 
-                # Formattazione badge Status Leghe Fantacalcio
                 status_lower = status_txt.lower()
                 if any(k in status_lower for k in ["inf", "infortunat", "operat", "lesion"]):
                     badge_status = f"🚑 **{status_txt}**"
@@ -265,7 +287,6 @@ if df is not None:
                 else:
                     badge_status = f"🟢 **{status_txt}**"
 
-                # Calcolo budget e slot rimanenti
                 df_sq_acq = df[df["FantaSquadra"] == sq_acquirente]
                 spesi_acq = df_sq_acq["Costo"].sum()
                 rimasti_acq = budget_iniziale - spesi_acq
@@ -274,7 +295,6 @@ if df is not None:
                 slot_rimasti_ruolo = max(1, target_slots.get(ruolo_g, 6) - presi_ruolo)
                 tot_slot_rimasti = max(1, tot_slots_target - len(df_sq_acq))
 
-                # Algoritmo Offerta Max Consigliata
                 fvm_scale = 1000.0 if fvm_g > 0 else 1.0
                 budget_target_ruolo = rimasti_acq * (fvm_g / fvm_scale) * 1.6
                 max_bid_possibile = rimasti_acq - (tot_slot_rimasti - 1)
@@ -823,5 +843,139 @@ if df is not None:
                         file_name=f"Report_{squadra_rep}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
+
+    # ---------------------------------------------------------
+    # TAB 6: SIMULATORE SCONTRI DIRETTI (MONTE CARLO)
+    # ---------------------------------------------------------
+    with tab_sim:
+        st.subheader("⚔️ Simulatore Scontri Diretti (Probabilità & Monte Carlo)")
+        st.markdown(
+            "Simula una sfida diretta tra due FantaSquadre basandoti sulla miglior Top 11 disponibile "
+            "e su **10.000 simulazioni stocastiche** con la regola dei gol di Fantacalcio (66 pt = 1° gol, +6 pt successivi)."
+        )
+
+        sim_col1, sim_col2 = st.columns(2)
+
+        with sim_col1:
+            st.markdown("### 🏠 Squadra Casa")
+            sq_casa = st.selectbox("Seleziona Squadra Casa:", lista_squadre, index=0, key="sim_casa")
+            modulo_casa_str = st.selectbox("Modulo Tattico Casa:", ["3-4-3", "3-5-2", "4-3-3", "4-4-2", "4-5-1"], key="mod_casa")
+            bonus_casa = st.number_input("Bonus Fattore Campo (Punti extra Casa):", min_value=0.0, max_value=5.0, value=2.0, step=0.5)
+
+        with sim_col2:
+            squadre_ospiti = [s for s in lista_squadre if s != sq_casa]
+            st.markdown("### ✈️ Squadra Ospite")
+            sq_ospite = st.selectbox("Seleziona Squadra Ospite:", squadre_ospiti if squadre_ospiti else lista_squadre, index=0, key="sim_ospite")
+            modulo_ospite_str = st.selectbox("Modulo Tattico Ospite:", ["3-4-3", "3-5-2", "4-3-3", "4-4-2", "4-5-1"], key="mod_ospite")
+
+        st.write("---")
+
+        # Parsing moduli
+        mod_casa_tuple = tuple(map(int, modulo_casa_str.split("-")))
+        mod_ospite_tuple = tuple(map(int, modulo_ospite_str.split("-")))
+
+        df_casa = df[df["FantaSquadra"].astype(str) == sq_casa]
+        df_ospite = df[df["FantaSquadra"].astype(str) == sq_ospite]
+
+        xi_casa = calcola_miglior_xi(df_casa, mod_casa_tuple)
+        xi_ospite = calcola_miglior_xi(df_ospite, mod_ospite_tuple)
+
+        if xi_casa is None or xi_ospite is None:
+            st.warning("⚠️ Una o entrambe le squadre non hanno abbastanza calciatori per completare la formazione titolare selezionata.")
+        else:
+            # Calcolo media attesa
+            xi_casa["FM_val"] = pd.to_numeric(xi_casa["FantaMedia"], errors="coerce").fillna(6.0)
+            xi_ospite["FM_val"] = pd.to_numeric(xi_ospite["FantaMedia"], errors="coerce").fillna(6.0)
+
+            media_casa_base = xi_casa["FM_val"].sum() + bonus_casa
+            media_ospite_base = xi_ospite["FM_val"].sum()
+
+            c_xi1, c_xi2 = st.columns(2)
+            with c_xi1:
+                st.markdown(f"**Top XI Casa ({sq_casa}) - Atteso: {media_casa_base:.2f} pt**")
+                st.dataframe(xi_casa[["Ruolo", "Calciatore", "Squadra", "Status", "FantaMedia"]], hide_index=True, use_container_width=True)
+
+            with c_xi2:
+                st.markdown(f"**Top XI Ospite ({sq_ospite}) - Atteso: {media_ospite_base:.2f} pt**")
+                st.dataframe(xi_ospite[["Ruolo", "Calciatore", "Squadra", "Status", "FantaMedia"]], hide_index=True, use_container_width=True)
+
+            if st.button("🚀 Lancia Simulazione Match (10.000 Partite)", use_container_width=True):
+                # Esecuzione Monte Carlo Simulation
+                n_sim = 10000
+                
+                # Deviazione standard stimata (~1.4 pt per giocatore -> ~4.64 pt per la squadra intera)
+                std_player = 1.4
+                std_team = np.sqrt(11) * std_player
+
+                sim_punti_casa = np.random.normal(loc=media_casa_base, scale=std_team, size=n_sim)
+                sim_punti_ospite = np.random.normal(loc=media_ospite_base, scale=std_team, size=n_sim)
+
+                # Conversione in Gol Fantacalcio per ciascuna simulazione
+                v_calcola_gol = np.vectorize(calcola_gol)
+                sim_gol_casa = v_calcola_gol(sim_punti_casa)
+                sim_gol_ospite = v_calcola_gol(sim_punti_ospite)
+
+                vittorie_casa = np.sum(sim_gol_casa > sim_gol_ospite)
+                pareggi = np.sum(sim_gol_casa == sim_gol_ospite)
+                vittorie_ospite = np.sum(sim_gol_casa < sim_gol_ospite)
+
+                pct_casa = (vittorie_casa / n_sim) * 100
+                pct_pareggio = (pareggi / n_sim) * 100
+                pct_ospite = (vittorie_ospite / n_sim) * 100
+
+                st.write("---")
+                st.markdown("### 🏆 Probabilità Esito Finale")
+
+                res_m1, res_m2, res_m3 = st.columns(3)
+                res_m1.metric(f"Vittoria {sq_casa} (1)", f"{pct_casa:.1f}%")
+                res_m2.metric("Pareggio (X)", f"{pct_pareggio:.1f}%")
+                res_m3.metric(f"Vittoria {sq_ospite} (2)", f"{pct_ospite:.1f}%")
+
+                # Grafico Donut Probabilità
+                fig_prob = go.Figure(
+                    data=[
+                        go.Pie(
+                            labels=[f"Vittoria {sq_casa}", "Pareggio", f"Vittoria {sq_ospite}"],
+                            values=[vittorie_casa, pareggi, vittorie_ospite],
+                            hole=0.4,
+                            marker_colors=["#2ecc71", "#f39c12", "#e74c3c"],
+                        )
+                    ]
+                )
+                fig_prob.update_layout(title_text="Distribuzione Probabilità Risultato", height=400)
+
+                # Grafico Istogramma Punteggi Simulati
+                df_dist = pd.DataFrame({
+                    "Punti": np.concatenate([sim_punti_casa, sim_punti_ospite]),
+                    "FantaSquadra": [sq_casa] * n_sim + [sq_ospite] * n_sim
+                })
+                fig_hist = px.histogram(
+                    df_dist,
+                    x="Punti",
+                    color="FantaSquadra",
+                    barmode="overlay",
+                    nbins=40,
+                    title="Distribuzione Monte Carlo Punti Totali",
+                    opacity=0.6,
+                )
+                fig_hist.add_vline(x=66, line_dash="dash", line_color="green", annotation_text="1° Gol (66 pt)")
+                fig_hist.add_vline(x=72, line_dash="dash", line_color="blue", annotation_text="2° Gol (72 pt)")
+                fig_hist.add_vline(x=78, line_dash="dash", line_color="purple", annotation_text="3° Gol (78 pt)")
+
+                g_c1, g_c2 = st.columns(2)
+                with g_c1:
+                    st.plotly_chart(fig_prob, use_container_width=True)
+                with g_c2:
+                    st.plotly_chart(fig_hist, use_container_width=True)
+
+                # Top Risultati Esatti più frequenti
+                risultati_esatti = [f"{g_c}-{g_o}" for g_c, g_o in zip(sim_gol_casa, sim_gol_ospite)]
+                df_res_esatti = pd.Series(risultati_esatti).value_counts().reset_index()
+                df_res_esatti.columns = ["Risultato Esatto", "Frequenza"]
+                df_res_esatti["Probabilità %"] = (df_res_esatti["Frequenza"] / n_sim * 100).round(1)
+
+                st.markdown("### ⚽ Risultati Esatti più Probabili")
+                st.dataframe(df_res_esatti.head(6), hide_index=True, use_container_width=True)
+
 else:
     st.info("👈 Carica il file `.xlsx` o `.csv` dalla barra laterale per iniziare!")
