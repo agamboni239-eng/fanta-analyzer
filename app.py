@@ -3,32 +3,38 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-# Configurazione della pagina
 st.set_page_config(
-    page_title="Fanta Analyzer", page_icon="⚽", layout="wide"
+    page_title="Fanta Analyzer & Asta Live", page_icon="⚽", layout="wide"
 )
 
-st.title("⚽ Fanta Analyzer - Dashboard Lega")
+# ---------------------------------------------------------
+# INIZIALIZZAZIONE SESSION STATE PER ASTA LIVE
+# ---------------------------------------------------------
+if "asta_history" not in st.session_state:
+  st.session_state["asta_history"] = []
 
-# 1. Sidebar: Caricamento File
-st.sidebar.header("📁 Carica Listone / File Lega")
+if "df_data" not in st.session_state:
+  st.session_state["df_data"] = None
+
+st.title("⚽ Fanta Analyzer - Dashboard & Assistente Asta Live")
+
+# 1. Sidebar: Caricamento File e Impostazioni Asta
+st.sidebar.header("📁 1. Carica Listone / File Lega")
 uploaded_file = st.sidebar.file_uploader(
     "Carica file Excel (.xlsx) o CSV", type=["xlsx", "csv"]
 )
 
-df = None
-
-if uploaded_file is not None:
+if uploaded_file is not None and st.session_state["df_data"] is None:
   try:
     if uploaded_file.name.endswith(".csv"):
       try:
-        df = pd.read_csv(uploaded_file)
-        if len(df.columns) <= 1:
+        df_raw = pd.read_csv(uploaded_file)
+        if len(df_raw.columns) <= 1:
           uploaded_file.seek(0)
-          df = pd.read_csv(uploaded_file, sep=";")
+          df_raw = pd.read_csv(uploaded_file, sep=";")
       except Exception:
         uploaded_file.seek(0)
-        df = pd.read_csv(uploaded_file, sep=";")
+        df_raw = pd.read_csv(uploaded_file, sep=";")
     else:
       xls = pd.ExcelFile(uploaded_file)
       sheet = (
@@ -36,9 +42,8 @@ if uploaded_file is not None:
           if "Lista calciatori" in xls.sheet_names
           else xls.sheet_names[0]
       )
-      df = pd.read_excel(uploaded_file, sheet_name=sheet)
+      df_raw = pd.read_excel(uploaded_file, sheet_name=sheet)
 
-    # Mappatura colonne
     mappatura = {
         "Nome": "Calciatore",
         "Sq.": "Squadra",
@@ -49,66 +54,89 @@ if uploaded_file is not None:
         "PGv": "PartiteVoto",
         "FVM/1000": "FVM",
     }
-    df = df.rename(columns=mappatura)
-    st.sidebar.success(f"File caricato! ({len(df)} calciatori)")
+    df_raw = df_raw.rename(columns=mappatura)
 
+    # Assicuriamo colonne minime per l'Asta
+    if "FantaSquadra" not in df_raw.columns:
+      df_raw["FantaSquadra"] = None
+    if "Costo" not in df_raw.columns:
+      df_raw["Costo"] = 0
+
+    st.session_state["df_data"] = df_raw
+    st.sidebar.success(f"File caricato! ({len(df_raw)} calciatori)")
   except Exception as e:
     st.sidebar.error(f"Errore caricamento: {e}")
 
+df = st.session_state["df_data"]
+
 if df is not None:
   st.sidebar.write("---")
-  st.sidebar.header("🔍 Filtri Avanzati")
+  st.sidebar.header("⚙️ 2. Impostazioni Asta Live")
+
+  budget_iniziale = st.sidebar.number_input(
+      "Budget Iniziale (Crediti)", min_value=100, max_value=2000, value=500
+  )
+
+  # Slot Rosa Target
+  col_s1, col_s2 = st.sidebar.columns(2)
+  target_P = col_s1.number_input("Slot P", value=3, min_value=1)
+  target_D = col_s2.number_input("Slot D", value=8, min_value=1)
+  target_C = col_s1.number_input("Slot C", value=8, min_value=1)
+  target_A = col_s2.number_input("Slot A", value=6, min_value=1)
+  target_slots = {"P": target_P, "D": target_D, "C": target_C, "A": target_A}
+  tot_slots_target = sum(target_slots.values())
+
+  # Configurazione FantaSquadre Partecipanti
+  fantasquadre_esistenti = sorted([
+      str(x)
+      for x in df["FantaSquadra"].dropna().unique()
+      if str(x).strip() != ""
+  ])
+  if not fantasquadre_esistenti:
+    fantasquadre_esistenti = [f"FantaSquadra {i}" for i in range(1, 9)]
+
+  fantasquadre_input = st.sidebar.text_area(
+      "Lista FantaSquadre (una per riga):",
+      value="\n".join(fantasquadre_esistenti),
+      height=120,
+  )
+  lista_squadre = [
+      s.strip() for s.strip(fantasquadre_input).split("\n") if s.strip()
+  ]
+
+  st.sidebar.write("---")
+  st.sidebar.header("🔍 3. Filtri Generali")
 
   df_filtrato = df.copy()
 
-  # Lista FantaSquadre e filtro
-  if "FantaSquadra" in df.columns:
-    stato_opzioni = ["Tutti", "Solo Svincolati", "Solo Acquistati"]
-    stato_sel = st.sidebar.selectbox("Stato Calciatore", stato_opzioni)
+  stato_opzioni = ["Tutti", "Solo Svincolati", "Solo Acquistati"]
+  stato_sel = st.sidebar.selectbox("Stato Calciatore", stato_opzioni)
 
-    if stato_sel == "Solo Svincolati":
-      df_filtrato = df_filtrato[df_filtrato["FantaSquadra"].isna()]
-    elif stato_sel == "Solo Acquistati":
-      df_filtrato = df_filtrato[df_filtrato["FantaSquadra"].notna()]
+  if stato_sel == "Solo Svincolati":
+    df_filtrato = df_filtrato[
+        df_filtrato["FantaSquadra"].isna()
+        | (df_filtrato["FantaSquadra"] == "")
+    ]
+  elif stato_sel == "Solo Acquistati":
+    df_filtrato = df_filtrato[
+        df_filtrato["FantaSquadra"].notna() & (df_filtrato["FantaSquadra"] != "")
+    ]
 
-    fantasquadre = sorted(
-        [
-            str(x)
-            for x in df["FantaSquadra"].dropna().unique()
-            if str(x).strip() != ""
-        ]
-    )
-    fantasquadre_filtro = ["Tutte"] + fantasquadre
-    if len(fantasquadre) > 0 and stato_sel != "Solo Svincolati":
-      fantasquadra_sel = st.sidebar.selectbox(
-          "FantaSquadra della Lega", fantasquadre_filtro
-      )
-      if fantasquadra_sel != "Tutte":
-        df_filtrato = df_filtrato[
-            df_filtrato["FantaSquadra"].astype(str) == fantasquadra_sel
-        ]
-  else:
-    fantasquadre = []
+  fantasquadre_filtro = ["Tutte"] + lista_squadre
+  fantasquadra_sel = st.sidebar.selectbox(
+      "FantaSquadra da Filtrare", fantasquadre_filtro
+  )
+  if fantasquadra_sel != "Tutte":
+    df_filtrato = df_filtrato[
+        df_filtrato["FantaSquadra"].astype(str) == fantasquadra_sel
+    ]
 
-  # Filtro Ruolo Classic
   if "Ruolo" in df.columns:
     ruoli = ["Tutti"] + list(df["Ruolo"].dropna().astype(str).unique())
     ruolo_sel = st.sidebar.selectbox("Ruolo Classic", ruoli)
     if ruolo_sel != "Tutti":
       df_filtrato = df_filtrato[df_filtrato["Ruolo"].astype(str) == ruolo_sel]
 
-  # Filtro Squadra Serie A
-  if "Squadra" in df.columns:
-    squadre = ["Tutte"] + sorted(
-        list(df["Squadra"].dropna().astype(str).unique())
-    )
-    squadra_sel = st.sidebar.selectbox("Squadra Serie A", squadre)
-    if squadra_sel != "Tutte":
-      df_filtrato = df_filtrato[
-          df_filtrato["Squadra"].astype(str) == squadra_sel
-      ]
-
-  # Ricerca per Nome
   if "Calciatore" in df.columns:
     nome_cercato = st.sidebar.text_input("Cerca Calciatore", "")
     if nome_cercato:
@@ -118,8 +146,9 @@ if df is not None:
           .str.contains(nome_cercato, case=False)
       ]
 
-  # Tab dell'app
-  tab1, tab2, tab3, tab4, tab5 = st.tabs([
+  # TAB APPLICAZIONE
+  tab_asta, tab1, tab2, tab3, tab4, tab5 = st.tabs([
+      "⚡ Assistente Asta Live",
       "📋 Lista Calciatori",
       "📊 Grafico Occasioni",
       "🛡️ Analisi Rose Lega",
@@ -127,7 +156,141 @@ if df is not None:
       "📄 Report & Formazione",
   ])
 
+  # ---------------------------------------------------------
+  # TAB ASTA LIVE
+  # ---------------------------------------------------------
+  with tab_asta:
+    st.subheader("⚡ Chiamata & Chiusura Asta in Tempo Reale")
+
+    col_chiamata, col_target = st.columns([1.2, 1])
+
+    with col_chiamata:
+      st.markdown("### 🏷️ Registra Acquisto")
+
+      # Selezione giocatore svincolato
+      svincolati_df = df[
+          df["FantaSquadra"].isna() | (df["FantaSquadra"] == "")
+      ].sort_values(by="FVM", ascending=False)
+      opzioni_giocatori = svincolati_df["Calciatore"].tolist()
+
+      if opzioni_giocatori:
+        giocatore_chiamato = st.selectbox(
+            "Seleziona Calciatore:", opzioni_giocatori
+        )
+        info_g = df[df["Calciatore"] == giocatore_chiamato].iloc[0]
+
+        sq_acquirente = st.selectbox("Acquistato da:", lista_squadre)
+        prezzo_acquisto = st.number_input(
+            "Prezzo di Aggiudicazione (Crediti):",
+            min_value=1,
+            max_value=budget_iniziale,
+            value=1,
+        )
+
+        c_btn1, c_btn2 = st.columns(2)
+        with c_btn1:
+          if st.button("✅ Registra Acquisto", use_container_width=True):
+            idx = df[df["Calciatore"] == giocatore_chiamato].index[0]
+            st.session_state["df_data"].loc[idx, "FantaSquadra"] = (
+                sq_acquirente
+            )
+            st.session_state["df_data"].loc[idx, "Costo"] = prezzo_acquisto
+            st.session_state["asta_history"].append(
+                (giocatore_chiamato, sq_acquirente, prezzo_acquisto)
+            )
+            st.success(
+                f"Aggiudicato **{giocatore_chiamato}** a **{sq_acquirente}** per"
+                f" **{prezzo_acquisto} cr**!"
+            )
+            st.rerun()
+
+        with c_btn2:
+          if (
+              st.button("↩️ Annulla Ultimo Acquisto", use_container_width=True)
+              and st.session_state["asta_history"]
+          ):
+            g_last, sq_last, p_last = st.session_state["asta_history"].pop()
+            idx = df[df["Calciatore"] == g_last].index[0]
+            st.session_state["df_data"].loc[idx, "FantaSquadra"] = None
+            st.session_state["df_data"].loc[idx, "Costo"] = 0
+            st.warning(f"Annullato acquisto di {g_last}.")
+            st.rerun()
+      else:
+        st.info("Tutti i calciatori sono stati acquistati!")
+
+    with col_target:
+      st.markdown("### 🎯 Moneyball Target: Prezzo Max Consigliato")
+      if opzioni_giocatori and 'info_g' in locals():
+        ruolo_g = info_g.get("Ruolo", "A")
+        fvm_g = float(info_g.get("FVM", 0)) if pd.notna(info_g.get("FVM")) else 0
+        fm_g = float(info_g.get("FantaMedia", 0)) if pd.notna(info_g.get("FantaMedia")) else 0
+
+        # Calcolo budget e slot rimanenti per la squadra acquirente
+        df_sq_acq = df[df["FantaSquadra"] == sq_acquirente]
+        spesi_acq = df_sq_acq["Costo"].sum()
+        rimasti_acq = budget_iniziale - spesi_acq
+
+        presi_ruolo = len(df_sq_acq[df_sq_acq["Ruolo"] == ruolo_g])
+        slot_rimasti_ruolo = max(1, target_slots.get(ruolo_g, 6) - presi_ruolo)
+        tot_slot_rimasti = max(1, tot_slots_target - len(df_sq_acq))
+
+        # Algoritmo Offerta Max Consigliata
+        fvm_scale = 1000.0 if fvm_g > 0 else 1.0
+        budget_target_ruolo = rimasti_acq * (fvm_g / fvm_scale) * 1.6
+        max_bid_possibile = rimasti_acq - (tot_slot_rimasti - 1)
+        prezzo_max_consigliato = max(
+            1, min(int(round(budget_target_ruolo)), max_bid_possibile)
+        )
+
+        st.metric(
+            label=f"Prezzo Max Consigliato per {info_g['Calciatore']}",
+            value=f"{prezzo_max_consigliato} cr",
+            delta=f"Slot {ruolo_g} Rimanenti: {slot_rimasti_ruolo}",
+        )
+
+        st.write(f"**Ruolo:** `{ruolo_g}` | **Squadra:** `{info_g.get('Squadra', '-')}`")
+        st.write(f"**FVM:** `{int(fvm_g)}` | **FantaMedia:** `{fm_g:.2f}`")
+        st.write(f"**Crediti Residui ({sq_acquirente}):** `{rimasti_acq} cr`")
+        st.write(f"**Max Offerta Singola consentita:** `{max_bid_possibile} cr`")
+
+    st.write("---")
+
+    # Tabella Riepilogativa Rose & Crediti
+    st.markdown("### 📊 Monitor Crediti e Slot Rose Lega")
+
+    report_rose = []
+    for sq in lista_squadre:
+      df_sq = df[df["FantaSquadra"] == sq]
+      spesi = df_sq["Costo"].sum()
+      residui = budget_iniziale - spesi
+
+      p_count = len(df_sq[df_sq["Ruolo"] == "P"])
+      d_count = len(df_sq[df_sq["Ruolo"] == "D"])
+      c_count = len(df_sq[df_sq["Ruolo"] == "C"])
+      a_count = len(df_sq[df_sq["Ruolo"] == "A"])
+      tot_in_rosa = len(df_sq)
+
+      slot_rimasti_tot = max(0, tot_slots_target - tot_in_rosa)
+      max_bid = residui - (slot_rimasti_tot - 1) if slot_rimasti_tot > 0 else 0
+
+      report_rose.append({
+          "FantaSquadra": sq,
+          "Crediti Spesi": spesi,
+          "Crediti Residui": residui,
+          "Max Offerta": max(0, max_bid),
+          "P": f"{p_count}/{target_P}",
+          "D": f"{d_count}/{target_D}",
+          "C": f"{c_count}/{target_C}",
+          "A": f"{a_count}/{target_A}",
+          "Totale Rosa": f"{tot_in_rosa}/{tot_slots_target}",
+      })
+
+    df_report_rose = pd.DataFrame(report_rose)
+    st.dataframe(df_report_rose, use_container_width=True, hide_index=True)
+
+  # ---------------------------------------------------------
   # TAB 1: LISTA GENERALE
+  # ---------------------------------------------------------
   with tab1:
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Calciatori Selezionati", len(df_filtrato))
@@ -152,7 +315,6 @@ if df is not None:
         "Calciatore",
         "Squadra",
         "Ruolo",
-        "R.MANTRA",
         "Quotazione",
         "FantaMedia",
         "MediaVoto",
@@ -173,7 +335,9 @@ if df is not None:
         hide_index=True,
     )
 
+  # ---------------------------------------------------------
   # TAB 2: GRAFICO OCCASIONI
+  # ---------------------------------------------------------
   with tab2:
     st.subheader("🎯 Mappa delle Occasioni: FantaMedia vs Quotazione")
     st.markdown(
@@ -230,14 +394,16 @@ if df is not None:
     else:
       st.info("Nessun dato disponibile con i filtri correnti.")
 
+  # ---------------------------------------------------------
   # TAB 3: ANALISI ROSE LEGA
+  # ---------------------------------------------------------
   with tab3:
     st.subheader("🛡️ Analisi Dettagliata Rosa FantaSquadra")
 
-    if fantasquadre:
+    if lista_squadre:
       squadra_scelta = st.selectbox(
           "Seleziona la FantaSquadra da analizzare:",
-          fantasquadre,
+          lista_squadre,
           key="tab3_sq",
       )
       df_squadra = df[df["FantaSquadra"].astype(str) == squadra_scelta].copy()
@@ -332,25 +498,18 @@ if df is not None:
           hide_index=True,
       )
 
-    else:
-      st.info("Nessuna FantaSquadra trovata nel file.")
-
+  # ---------------------------------------------------------
   # TAB 4: VALUTATORE DI SCAMBI
+  # ---------------------------------------------------------
   with tab4:
     st.subheader("🔄 Valutatore Scambi (Trade Analyzer)")
-    st.markdown(
-        "Seleziona i giocatori coinvolti nello scambio per simularne l'impatto"
-        " sulla tua rosa."
-    )
 
     t_col1, t_col2 = st.columns(2)
 
     with t_col1:
       st.markdown("### 🅰️ Giocatori che CEDO")
       squadra_A = st.selectbox(
-          "Seleziona la tua FantaSquadra:",
-          fantasquadre,
-          key="sq_A",
+          "Seleziona la tua FantaSquadra:", lista_squadre, key="sq_A"
       )
       df_squadra_A = df[df["FantaSquadra"].astype(str) == squadra_A]
       giocatori_ceduti = st.multiselect(
@@ -361,11 +520,9 @@ if df is not None:
 
     with t_col2:
       st.markdown("### 🅱️ Giocatori che RICEVO")
-      squadre_B_opts = [s for s in fantasquadre if s != squadra_A]
+      squadre_B_opts = [s for s in lista_squadre if s != squadra_A]
       squadra_B = st.selectbox(
-          "Seleziona la FantaSquadra avversaria:",
-          squadre_B_opts,
-          key="sq_B",
+          "Seleziona la FantaSquadra avversaria:", squadre_B_opts, key="sq_B"
       )
       df_squadra_B = df[df["FantaSquadra"].astype(str) == squadra_B]
       giocatori_ricevuti = st.multiselect(
@@ -413,8 +570,8 @@ if df is not None:
 
       if diff_fm > 0 and diff_fvm >= 0:
         st.success(
-            "🟢 **Scambio Vantaggioso:** Ottieni un guadagno sia in FantaMedia"
-            " che in valore complessivo!"
+            "🟢 **Scambio Vantaggioso:** Guadagno in FantaMedia e valore"
+            " complessivo!"
         )
       elif diff_fm < 0 and diff_fvm < 0:
         st.error(
@@ -423,8 +580,8 @@ if df is not None:
         )
       else:
         st.warning(
-            "🟡 **Scambio Equilibrato / Strategico:** Stai scambiando valore per"
-            " titolarità o ridistribuendo i ruoli tra i reparti."
+            "🟡 **Scambio Equilibrato / Strategico:** Stai ridistribuendo i"
+            " ruoli tra i reparti."
         )
 
       c_det1, c_det2 = st.columns(2)
@@ -453,39 +610,23 @@ if df is not None:
             df_ricevuti[cols_show], hide_index=True, use_container_width=True
         )
 
-    else:
-      st.info(
-          "Seleziona almeno un giocatore da cedere e uno da ricevere per"
-          " visualizzare l'analisi dello scambio."
-      )
-
+  # ---------------------------------------------------------
   # TAB 5: REPORT & OTTIMIZZATORE MODULO
+  # ---------------------------------------------------------
   with tab5:
     st.subheader("📄 Report & Ottimizzatore Modulo (con Modificatore Difesa)")
-    st.markdown(
-        "L'algoritmo valuta tutti i moduli consentiti (3-4-3, 3-5-2, 4-3-3,"
-        " 4-4-2, 4-5-1, 5-3-2, 5-4-1) e calcola il bonus atteso del"
-        " **Modificatore Difesa** per identificare l'XI titolare più potente."
-    )
 
-    if fantasquadre:
+    if lista_squadre:
       rep_col1, rep_col2 = st.columns([2, 1])
 
       with rep_col1:
         squadra_rep = st.selectbox(
-            "Seleziona FantaSquadra:",
-            fantasquadre,
-            key="rep_sq",
+            "Seleziona FantaSquadra:", lista_squadre, key="rep_sq"
         )
 
       with rep_col2:
         usa_modificatore = st.checkbox(
-            "Attiva Modificatore Difesa",
-            value=True,
-            help=(
-                "Si attiva con difesa a 4 o 5. Calcola il bonus in base alla"
-                " MediaVoto del portiere e dei 3 migliori difensori."
-            ),
+            "Attiva Modificatore Difesa", value=True
         )
 
       df_squadra_rep = df[
@@ -500,7 +641,6 @@ if df is not None:
             df_squadra_rep["MediaVoto"], errors="coerce"
         ).fillna(0)
 
-        # Moduli ammessi
         moduli = [
             (3, 4, 3),
             (3, 5, 2),
@@ -537,7 +677,6 @@ if df is not None:
           lineup = pd.concat([p, d, c, a])
           base_fm = lineup["FantaMedia_clean"].sum()
 
-          # Calcolo Modificatore Difesa (se d_c >= 4)
           mod_bonus = 0
           if usa_modificatore and d_c >= 4:
             gk_mv = p["MediaVoto_clean"].iloc[0]
@@ -571,7 +710,6 @@ if df is not None:
         if not df_moduli.empty:
           miglior_modulo = df_moduli.iloc[0]
 
-          # KPI Modulo Consigliato
           st.write("---")
           kpi_m1, kpi_m2, kpi_m3, kpi_m4 = st.columns(4)
           kpi_m1.metric("Modulo Consigliato", miglior_modulo["Modulo"])
@@ -587,8 +725,6 @@ if df is not None:
           )
 
           st.write("---")
-
-          # Tabella di confronto tra i moduli
           st.markdown("### 📊 Confronto Rendimento Moduli Tattici")
           st.dataframe(
               df_moduli[
@@ -598,7 +734,6 @@ if df is not None:
               hide_index=True,
           )
 
-          # Formazione IdealeSchierata
           top_11 = miglior_modulo["Lineup"]
           st.markdown(
               f"### 🏟️ XI Titolare Consigliato ({miglior_modulo['Modulo']}) -"
@@ -622,7 +757,7 @@ if df is not None:
               top_11[cols_rep], use_container_width=True, hide_index=True
           )
 
-          # Download File Excel
+          # Export Excel
           output = io.BytesIO()
           with pd.ExcelWriter(output, engine="openpyxl") as writer:
             top_11[cols_rep].to_excel(
@@ -631,7 +766,7 @@ if df is not None:
             df_moduli[
                 ["Modulo", "Base FM", "Bonus Modificatore", "Punteggio Totale Atteso"]
             ].to_excel(writer, index=False, sheet_name="Confronto Moduli")
-            df_squadra_rep[cols_rep].to_excel(
+            df[cols_rep].to_excel(
                 writer, index=False, sheet_name="Rosa Completa"
             )
           excel_data = output.getvalue()
@@ -642,11 +777,5 @@ if df is not None:
               file_name=f"Report_{squadra_rep}.xlsx",
               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           )
-    else:
-      st.info("Nessuna FantaSquadra trovata per generare il report.")
-
 else:
-  st.info(
-      "👈 Carica il file `.xlsx` scaricato da Leghe Fantacalcio dalla barra"
-      " laterale!"
-  )
+  st.info("👈 Carica il file `.xlsx` o `.csv` dalla barra laterale per iniziare!")
