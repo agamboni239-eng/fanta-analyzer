@@ -53,8 +53,21 @@ if uploaded_file is not None and st.session_state["df_data"] is None:
         "MV": "MediaVoto",
         "PGv": "PartiteVoto",
         "FVM/1000": "FVM",
+        "Info": "Status",        #Mappatura per file scaricati da Fantacalcio.it
+        "Condizione": "Status",
     }
     df_raw = df_raw.rename(columns=mappatura)
+
+    # Inizializzazione colonne mancanti
+        if "Status" not in df_raw.columns:
+            df_raw["Status"] = "Disponibile"
+        else:
+            df_raw["Status"] = df_raw["Status"].fillna("Disponibile")
+
+        if "FantaSquadra" not in df_raw.columns:
+            df_raw["FantaSquadra"] = None
+        if "Costo" not in df_raw.columns:
+            df_raw["Costo"] = 0
 
     # Assicuriamo colonne minime per l'Asta
     if "FantaSquadra" not in df_raw.columns:
@@ -86,6 +99,18 @@ if df is not None:
   target_slots = {"P": target_P, "D": target_D, "C": target_C, "A": target_A}
   tot_slots_target = sum(target_slots.values())
 
+
+# Filtro Status Calciatore
+    if "Status" in df.columns:
+        stati_disponibili = ["Tutti"] + list(df["Status"].dropna().astype(str).unique())
+        status_sel = st.sidebar.multiselect(
+            "Status / Condizione",
+            stati_disponibili,
+            default=["Tutti"]
+        )
+        if "Tutti" not in status_sel and status_sel:
+            df_filtrato = df_filtrato[df_filtrato["Status"].astype(str).isin(status_sel)]
+            
   # Configurazione FantaSquadre Partecipanti
   fantasquadre_esistenti = sorted([
       str(x)
@@ -222,8 +247,23 @@ if df is not None:
       st.markdown("### 🎯 Moneyball Target: Prezzo Max Consigliato")
       if opzioni_giocatori and 'info_g' in locals():
         ruolo_g = info_g.get("Ruolo", "A")
+        status_g = str(info_g.get("Status", "Disponibile"))
         fvm_g = float(info_g.get("FVM", 0)) if pd.notna(info_g.get("FVM")) else 0
         fm_g = float(info_g.get("FantaMedia", 0)) if pd.notna(info_g.get("FantaMedia")) else 0
+
+        #Formattazione visiva dello Status
+        emoji_status = "🟢"
+                if "Infortunat" in status_g or "Infortunio" in status_g:
+                    emoji_status = "🚑"
+                elif "Squalificat" in status_g:
+                    emoji_status = "🟥"
+                elif "Dubbio" in status_g or "Ballottaggio" in status_g:
+                    emoji_status = "⚠️"
+                elif "Fuori" in status_g or "Ceduto" in status_g:
+                    emoji_status = "🚫"
+
+                st.write(f"**Ruolo:** `{ruolo_g}` | **Squadra:** `{info_g.get('Squadra', '-')}`")
+                st.write(f"**Status:** {emoji_status} **{status_g}**")
 
         # Calcolo budget e slot rimanenti per la squadra acquirente
         df_sq_acq = df[df["FantaSquadra"] == sq_acquirente]
@@ -315,6 +355,7 @@ if df is not None:
         "Calciatore",
         "Squadra",
         "Ruolo",
+        "Status",
         "Quotazione",
         "FantaMedia",
         "MediaVoto",
