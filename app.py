@@ -893,7 +893,10 @@ if df is not None:
             c_xi1, c_xi2 = st.columns(2)
             with c_xi1:
                 st.markdown(f"**Top XI Casa ({sq_casa}) - Atteso: {media_casa_base:.2f} pt**")
-                st.dataframe(xi_casa[["Ruolo", "Calciatore", "Squadra", "Status", "FantaMedia"]], hide_index=True, use_container_width=True)
+                target_cols = ["Ruolo", "Calciatore", "Squadra", "Status", "FantaMedia"]
+                available_cols = [col for col in target_cols if col in xi_casa.columns]
+
+                st.dataframe(xi_casa[available_cols], hide_index=True, use_container_width=True)
 
             with c_xi2:
                 st.markdown(f"**Top XI Ospite ({sq_ospite}) - Atteso: {media_ospite_base:.2f} pt**")
