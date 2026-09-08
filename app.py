@@ -820,165 +820,112 @@ if df is not None:
                         if c in top_11.columns
                     ]
                     st.dataframe(
-                        top_11[cols_rep], use_container_width=True, hide_index=True
-                    )
-
-                    # Export Excel
-                    output = io.BytesIO()
-                    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                        top_11[cols_rep].to_excel(
-                            writer, index=False, sheet_name=f"Top XI {miglior_modulo['Modulo']}"
-                        )
-                        df_moduli[
-                            ["Modulo", "Base FM", "Bonus Modificatore", "Punteggio Totale Atteso"]
-                        ].to_excel(writer, index=False, sheet_name="Confronto Moduli")
-                        df[cols_rep].to_excel(
-                            writer, index=False, sheet_name="Rosa Completa"
-                        )
-                    excel_data = output.getvalue()
-
-                    st.download_button(
-                        label=f"📥 Scarica Report Excel ({squadra_rep})",
-                        data=excel_data,
-                        file_name=f"Report_{squadra_rep}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        top_11[cols_rep],
+                        use_container_width=True,
+                        hide_index=True,
                     )
 
     # ---------------------------------------------------------
-    # TAB 6: SIMULATORE SCONTRI DIRETTI (MONTE CARLO)
+    # TAB 6: SIMULATORE SCONTRI DIRETTI
     # ---------------------------------------------------------
     with tab_sim:
-        st.subheader("⚔️ Simulatore Scontri Diretti (Probabilità & Monte Carlo)")
+        st.subheader("⚔️ Simulatore Scontri Diretti")
         st.markdown(
-            "Simula una sfida diretta tra due FantaSquadre basandoti sulla miglior Top 11 disponibile "
-            "e su **10.000 simulazioni stocastiche** con la regola dei gol di Fantacalcio (66 pt = 1° gol, +6 pt successivi)."
+            "Simula una sfida diretta tra due FantaSquadre calcolando i punti attesi e i gol segnati in base al miglior XI schierabile."
         )
 
-        sim_col1, sim_col2 = st.columns(2)
+        if len(lista_squadre) >= 2:
+            col_sim1, col_sim2 = st.columns(2)
 
-        with sim_col1:
-            st.markdown("### 🏠 Squadra Casa")
-            sq_casa = st.selectbox("Seleziona Squadra Casa:", lista_squadre, index=0, key="sim_casa")
-            modulo_casa_str = st.selectbox("Modulo Tattico Casa:", ["3-4-3", "3-5-2", "4-3-3", "4-4-2", "4-5-1"], key="mod_casa")
-            bonus_casa = st.number_input("Bonus Fattore Campo (Punti extra Casa):", min_value=0.0, max_value=5.0, value=2.0, step=0.5)
+            with col_sim1:
+                sq_casa = st.selectbox(
+                    "FantaSquadra Casa:",
+                    lista_squadre,
+                    key="sim_sq_casa",
+                )
+            with col_sim2:
+                opts_trasferta = [s for s in lista_squadre if s != sq_casa]
+                sq_trasferta = st.selectbox(
+                    "FantaSquadra Trasferta:",
+                    opts_trasferta,
+                    key="sim_sq_trasferta",
+                )
 
-        with sim_col2:
-            squadre_ospiti = [s for s in lista_squadre if s != sq_casa]
-            st.markdown("### ✈️ Squadra Ospite")
-            sq_ospite = st.selectbox("Seleziona Squadra Ospite:", squadre_ospiti if squadre_ospiti else lista_squadre, index=0, key="sim_ospite")
-            modulo_ospite_str = st.selectbox("Modulo Tattico Ospite:", ["3-4-3", "3-5-2", "4-3-3", "4-4-2", "4-5-1"], key="mod_ospite")
+            col_cfg1, col_cfg2, col_cfg3 = st.columns(3)
+            mod_casa = col_cfg1.selectbox(
+                "Modulo Casa:",
+                [(3, 4, 3), (3, 5, 2), (4, 3, 3), (4, 4, 2), (4, 5, 1), (5, 3, 2), (5, 4, 1)],
+                index=2,
+                key="mod_casa",
+            )
+            mod_trasferta = col_cfg2.selectbox(
+                "Modulo Trasferta:",
+                [(3, 4, 3), (3, 5, 2), (4, 3, 3), (4, 4, 2), (4, 5, 1), (5, 3, 2), (5, 4, 1)],
+                index=2,
+                key="mod_trasferta",
+            )
+            soglia_gol = col_cfg3.number_input(
+                "Soglia Primo Gol:", value=66.0, step=0.5
+            )
 
-        st.write("---")
+            if st.button("🚀 Simula Partita", use_container_width=True):
+                df_casa = df[df["FantaSquadra"].astype(str) == sq_casa]
+                df_trasferta = df[df["FantaSquadra"].astype(str) == sq_trasferta]
 
-        # Parsing moduli
-        mod_casa_tuple = tuple(map(int, modulo_casa_str.split("-")))
-        mod_ospite_tuple = tuple(map(int, modulo_ospite_str.split("-")))
+                xi_casa = calcola_miglior_xi(df_casa, modulo=mod_casa)
+                xi_trasferta = calcola_miglior_xi(df_trasferta, modulo=mod_trasferta)
 
-        df_casa = df[df["FantaSquadra"].astype(str) == sq_casa]
-        df_ospite = df[df["FantaSquadra"].astype(str) == sq_ospite]
+                if xi_casa is None or xi_trasferta is None:
+                    st.error(
+                        "Una o entrambe le squadre non hanno abbastanza giocatori titolari disponibili per il modulo selezionato."
+                    )
+                else:
+                    punti_casa = xi_casa["FM_clean"].sum()
+                    punti_trasferta = xi_trasferta["FM_clean"].sum()
 
-        xi_casa = calcola_miglior_xi(df_casa, mod_casa_tuple)
-        xi_ospite = calcola_miglior_xi(df_ospite, mod_ospite_tuple)
+                    gol_casa = calcola_gol(punti_casa, soglia_primo_gol=soglia_gol)
+                    gol_trasferta = calcola_gol(punti_trasferta, soglia_primo_gol=soglia_gol)
 
-        if xi_casa is None or xi_ospite is None:
-            st.warning("⚠️ Una o entrambe le squadre non hanno abbastanza calciatori per completare la formazione titolare selezionata.")
-        else:
-            # Calcolo media attesa
-            xi_casa["FM_val"] = pd.to_numeric(xi_casa["FantaMedia"], errors="coerce").fillna(6.0)
-            xi_ospite["FM_val"] = pd.to_numeric(xi_ospite["FantaMedia"], errors="coerce").fillna(6.0)
+                    st.write("---")
+                    st.markdown("### 🏟️ Risultato Finale")
 
-            media_casa_base = xi_casa["FM_val"].sum() + bonus_casa
-            media_ospite_base = xi_ospite["FM_val"].sum()
-
-            c_xi1, c_xi2 = st.columns(2)
-            with c_xi1:
-                st.markdown(f"**Top XI Casa ({sq_casa}) - Atteso: {media_casa_base:.2f} pt**")
-                target_cols = ["Ruolo", "Calciatore", "Squadra", "Status", "FantaMedia"]
-                available_cols = [col for col in target_cols if col in xi_casa.columns]
-
-                st.dataframe(xi_casa[available_cols], hide_index=True, use_container_width=True)
-
-            with c_xi2:
-                st.markdown(f"**Top XI Ospite ({sq_ospite}) - Atteso: {media_ospite_base:.2f} pt**")
-                st.dataframe(xi_ospite[["Ruolo", "Calciatore", "Squadra", "Status", "FantaMedia"]], hide_index=True, use_container_width=True)
-
-            if st.button("🚀 Lancia Simulazione Match (10.000 Partite)", use_container_width=True):
-                # Esecuzione Monte Carlo Simulation
-                n_sim = 10000
-                
-                # Deviazione standard stimata (~1.4 pt per giocatore -> ~4.64 pt per la squadra intera)
-                std_player = 1.4
-                std_team = np.sqrt(11) * std_player
-
-                sim_punti_casa = np.random.normal(loc=media_casa_base, scale=std_team, size=n_sim)
-                sim_punti_ospite = np.random.normal(loc=media_ospite_base, scale=std_team, size=n_sim)
-
-                # Conversione in Gol Fantacalcio per ciascuna simulazione
-                v_calcola_gol = np.vectorize(calcola_gol)
-                sim_gol_casa = v_calcola_gol(sim_punti_casa)
-                sim_gol_ospite = v_calcola_gol(sim_punti_ospite)
-
-                vittorie_casa = np.sum(sim_gol_casa > sim_gol_ospite)
-                pareggi = np.sum(sim_gol_casa == sim_gol_ospite)
-                vittorie_ospite = np.sum(sim_gol_casa < sim_gol_ospite)
-
-                pct_casa = (vittorie_casa / n_sim) * 100
-                pct_pareggio = (pareggi / n_sim) * 100
-                pct_ospite = (vittorie_ospite / n_sim) * 100
-
-                st.write("---")
-                st.markdown("### 🏆 Probabilità Esito Finale")
-
-                res_m1, res_m2, res_m3 = st.columns(3)
-                res_m1.metric(f"Vittoria {sq_casa} (1)", f"{pct_casa:.1f}%")
-                res_m2.metric("Pareggio (X)", f"{pct_pareggio:.1f}%")
-                res_m3.metric(f"Vittoria {sq_ospite} (2)", f"{pct_ospite:.1f}%")
-
-                # Grafico Donut Probabilità
-                fig_prob = go.Figure(
-                    data=[
-                        go.Pie(
-                            labels=[f"Vittoria {sq_casa}", "Pareggio", f"Vittoria {sq_ospite}"],
-                            values=[vittorie_casa, pareggi, vittorie_ospite],
-                            hole=0.4,
-                            marker_colors=["#2ecc71", "#f39c12", "#e74c3c"],
+                    res_col1, res_col2, res_col3 = st.columns([2, 1, 2])
+                    with res_col1:
+                        st.metric(
+                            label=f"🏠 {sq_casa}",
+                            value=f"{gol_casa} Gol",
+                            delta=f"{punti_casa:.2f} Punti Totali",
                         )
-                    ]
-                )
-                fig_prob.update_layout(title_text="Distribuzione Probabilità Risultato", height=400)
+                    with res_col2:
+                        st.markdown(
+                            f"<h1 style='text-align: center; margin: 0;'>{gol_casa} - {gol_trasferta}</h1>",
+                            unsafe_allow_html=True,
+                        )
+                    with res_col3:
+                        st.metric(
+                            label=f"✈️ {sq_trasferta}",
+                            value=f"{gol_trasferta} Gol",
+                            delta=f"{punti_trasferta:.2f} Punti Totali",
+                        )
 
-                # Grafico Istogramma Punteggi Simulati
-                df_dist = pd.DataFrame({
-                    "Punti": np.concatenate([sim_punti_casa, sim_punti_ospite]),
-                    "FantaSquadra": [sq_casa] * n_sim + [sq_ospite] * n_sim
-                })
-                fig_hist = px.histogram(
-                    df_dist,
-                    x="Punti",
-                    color="FantaSquadra",
-                    barmode="overlay",
-                    nbins=40,
-                    title="Distribuzione Monte Carlo Punti Totali",
-                    opacity=0.6,
-                )
-                fig_hist.add_vline(x=66, line_dash="dash", line_color="green", annotation_text="1° Gol (66 pt)")
-                fig_hist.add_vline(x=72, line_dash="dash", line_color="blue", annotation_text="2° Gol (72 pt)")
-                fig_hist.add_vline(x=78, line_dash="dash", line_color="purple", annotation_text="3° Gol (78 pt)")
+                    if gol_casa > gol_trasferta:
+                        st.success(f"🎉 **Vittoria per {sq_casa}!**")
+                    elif gol_trasferta > gol_casa:
+                        st.success(f"🎉 **Vittoria per {sq_trasferta}!**")
+                    else:
+                        st.info("🤝 **Pareggio!**")
 
-                g_c1, g_c2 = st.columns(2)
-                with g_c1:
-                    st.plotly_chart(fig_prob, use_container_width=True)
-                with g_c2:
-                    st.plotly_chart(fig_hist, use_container_width=True)
+                    c_lineup1, c_lineup2 = st.columns(2)
+                    cols_view = [c for c in ["Ruolo", "Calciatore", "Squadra", "FantaMedia"] if c in xi_casa.columns]
 
-                # Top Risultati Esatti più frequenti
-                risultati_esatti = [f"{g_c}-{g_o}" for g_c, g_o in zip(sim_gol_casa, sim_gol_ospite)]
-                df_res_esatti = pd.Series(risultati_esatti).value_counts().reset_index()
-                df_res_esatti.columns = ["Risultato Esatto", "Frequenza"]
-                df_res_esatti["Probabilità %"] = (df_res_esatti["Frequenza"] / n_sim * 100).round(1)
+                    with c_lineup1:
+                        st.markdown(f"**XI Titolare {sq_casa} ({mod_casa[0]}-{mod_casa[1]}-{mod_casa[2]})**")
+                        st.dataframe(xi_casa[cols_view], hide_index=True, use_container_width=True)
 
-                st.markdown("### ⚽ Risultati Esatti più Probabili")
-                st.dataframe(df_res_esatti.head(6), hide_index=True, use_container_width=True)
-
+                    with c_lineup2:
+                        st.markdown(f"**XI Titolare {sq_trasferta} ({mod_trasferta[0]}-{mod_trasferta[1]}-{mod_trasferta[2]})**")
+                        st.dataframe(xi_trasferta[cols_view], hide_index=True, use_container_width=True)
+        else:
+            st.info("Sono necessarie almeno 2 FantaSquadre per simulare uno scontro diretto.")
 else:
-    st.info("👈 Carica il file `.xlsx` o `.csv` dalla barra laterale per iniziare!")
+    st.info("👈 Carica un file Excel o CSV dalla barra laterale per iniziare.")
